@@ -1,0 +1,2 @@
+# Place codeformer-ncnn-vulkan here (not committed).
+# Set CODEFORMER_BIN in .env if the binary lives elsewhere.

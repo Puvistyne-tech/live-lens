@@ -1,0 +1,22 @@
+{
+  "watchRoots": [],
+  "recursive": true,
+  "extensions": [".jpg", ".jpeg"],
+  "ignoreRaw": [".cr3", ".arw", ".nef", ".raf", ".dng", ".orf", ".rw2"],
+  "burstWindowMs": 4000,
+  "burstKeep": 1,
+  "burstSeqGap": 8,
+  "minFileBytes": 20480,
+  "uploadMaxEdge": 2048,
+  "uploadJpegQuality": 78,
+  "aiEnabled": true,
+  "codeformerWeight": 0.7,
+  "depthEnabled": true,
+  "captionEnabled": true,
+  "tagModels": ["florence2-ft", "moondream2", "smolvlm2"],
+  "tagTimeoutMs": 180000,
+  "tagQueueEnabled": true,
+  "keepRejects": true,
+  "minIntervalMs": 0,
+  "processConcurrency": 2
+}

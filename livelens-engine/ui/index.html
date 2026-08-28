@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LiveLens Engine</title>
+    <style>
+      :root {
+        --bg: #12141a;
+        --panel: #1c1f28;
+        --text: #f2f0ea;
+        --muted: #9a958c;
+        --accent: #c4a574;
+        --line: #2c303c;
+        --ok: #6fbf8a;
+        --danger: #d77a6d;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+        background:
+          radial-gradient(1200px 600px at 10% -10%, #2a2430 0%, transparent 50%),
+          radial-gradient(900px 500px at 100% 0%, #1a2430 0%, transparent 45%),
+          var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+      main { max-width: 920px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+      h1 { font-weight: 500; letter-spacing: 0.02em; margin: 0 0 0.25rem; font-size: 2rem; }
+      .sub { color: var(--muted); margin-bottom: 1.75rem; }
+      .panel {
+        background: color-mix(in srgb, var(--panel) 92%, transparent);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+      }
+      label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; }
+      input, select, textarea {
+        width: 100%;
+        background: #101218;
+        border: 1px solid var(--line);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 0.65rem 0.75rem;
+        font: inherit;
+      }
+      .row { display: grid; gap: 0.75rem; grid-template-columns: 1fr 1fr; margin-bottom: 0.75rem; }
+      @media (max-width: 700px) { .row { grid-template-columns: 1fr; } }
+      .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.6rem 1rem;
+        font: inherit;
+        cursor: pointer;
+        background: var(--accent);
+        color: #1a140c;
+      }
+      button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+      button.danger { background: var(--danger); color: #1a0f0d; }
+      button.small {
+        padding: 0.35rem 0.65rem;
+        font-size: 0.75rem;
+        width: 100%;
+        border-radius: 8px;
+        margin-top: 0.35rem;
+      }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      .status { display: inline-flex; align-items: center; gap: 0.4rem; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+      .dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+      .tip { color: var(--muted); font-size: 0.92rem; margin-top: 0.5rem; }
+      .check-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.25rem;
+        margin-bottom: 0.75rem;
+        align-items: center;
+      }
+      .check-row label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin: 0;
+        color: var(--text);
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+      .check-row input { width: auto; }
+      .section-label {
+        margin: 1rem 0 0.5rem;
+        font-size: 0.85rem;
+        color: var(--accent);
+      }
+      .logs {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem;
+        max-height: 260px;
+        overflow: auto;
+        white-space: pre-wrap;
+        background: #0d0f14;
+        border-radius: 8px;
+        padding: 0.75rem;
+        border: 1px solid var(--line);
+      }
+      .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.35rem 0.7rem;
+        cursor: pointer;
+        color: var(--text);
+        background: transparent;
+        font-size: 0.85rem;
+      }
+      .chip.active {
+        background: color-mix(in srgb, var(--accent) 28%, transparent);
+        border-color: var(--accent);
+        color: #f5ead8;
+      }
+      .guide {
+        margin-top: 0.85rem;
+        max-height: 420px;
+        overflow: auto;
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        background: #0d0f14;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.9rem 1rem;
+        color: #d8d4cb;
+      }
+      .guide[hidden] { display: none; }
+      .guide-title {
+        margin: 0.85rem 0 0;
+        font-size: 0.95rem;
+        color: var(--accent);
+      }
+      ul.roots { list-style: none; padding: 0; margin: 0 0 0.75rem; }
+      ul.roots li {
+        display: flex; justify-content: space-between; gap: 0.5rem;
+        padding: 0.45rem 0; border-bottom: 1px solid var(--line); font-size: 0.92rem;
+      }
+      details.reject-panel > summary {
+        cursor: pointer;
+        list-style: none;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.75rem;
+        user-select: none;
+      }
+      details.reject-panel > summary::-webkit-details-marker { display: none; }
+      details.reject-panel > summary .summary-title {
+        font-size: 0.95rem;
+        color: var(--text);
+      }
+      details.reject-panel > summary .summary-meta {
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      details.reject-panel > summary::before {
+        content: "▸";
+        color: var(--accent);
+        margin-right: 0.35rem;
+        display: inline-block;
+        transition: transform 0.15s ease;
+      }
+      details.reject-panel[open] > summary::before {
+        transform: rotate(90deg);
+      }
+      .reject-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.65rem;
+        margin-top: 0.75rem;
+      }
+      .reject-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+        background: #0d0f14;
+      }
+      .reject-card img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        background: #161922;
+      }
+      .reject-card .meta {
+        padding: 0.45rem 0.5rem 0.55rem;
+        font-size: 0.72rem;
+        color: var(--muted);
+        line-height: 1.35;
+        word-break: break-all;
+      }
+      .reject-card .reason {
+        color: var(--danger);
+        margin-top: 0.2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>LiveLens Engine</h1>
+      <p class="sub">Local FTP watch · burst pick · AI enhance · R2 upload</p>
+
+      <section class="panel">
+        <div class="status"><span id="dot" class="dot"></span> <span id="runState">Stopped</span></div>
+        <p class="tip" id="statusMeta" style="margin-top:0.35rem">Waiting for status…</p>
+        <p class="tip" id="statusError" hidden style="color:var(--danger);margin-top:0.35rem"></p>
+        <div class="actions">
+          <button id="startBtn">Start watcher</button>
+          <button id="stopBtn" class="danger">Stop</button>
+          <button id="refreshBtn" class="secondary">Refresh</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <label>Camera presets</label>
+        <div class="chips" id="presets"></div>
+        <p class="tip" id="presetTip">
+          Choose a camera to apply JPEG-only watch settings and open the full FTP connection guide.
+        </p>
+        <p class="guide-title" id="guideTitle" hidden></p>
+        <pre class="guide" id="presetGuide" hidden></pre>
+
+        <label style="margin-top:1rem">Watch folders</label>
+        <ul class="roots" id="roots"></ul>
+        <div class="row">
+          <div>
+            <label for="newRoot">Add folder path</label>
+            <input id="newRoot" placeholder="/Users/you/…/FTP_Drop or C:\\WeddingPhotos\\FTP_Drop" />
+          </div>
+          <div style="display:flex;align-items:flex-end;gap:0.5rem;flex-wrap:wrap">
+            <button id="pickRoot" class="secondary" type="button">Select folder</button>
+            <button id="addRoot" class="secondary" type="button">Add folder</button>
+          </div>
+        </div>
+
+        <p class="section-label">Burst &amp; watch</p>
+        <div class="row">
+          <div>
+            <label for="extensions">Extensions (comma)</label>
+            <input id="extensions" />
+          </div>
+          <div>
+            <label for="ignoreRaw">Ignore RAW (comma)</label>
+            <input id="ignoreRaw" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="burstWindowMs">Burst window (ms)</label>
+            <input id="burstWindowMs" type="number" />
+          </div>
+          <div>
+            <label for="burstKeep">Keep per burst</label>
+            <input id="burstKeep" type="number" min="1" max="2" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="burstSeqGap">Burst name gap (seq)</label>
+            <input id="burstSeqGap" type="number" min="0" max="50" />
+          </div>
+          <div>
+            <label for="minFileBytes">Min file bytes</label>
+            <input id="minFileBytes" type="number" min="0" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="uploadMaxEdge">Max upload edge (px)</label>
+            <input id="uploadMaxEdge" type="number" min="320" max="8000" />
+          </div>
+          <div>
+            <label for="uploadJpegQuality">Upload JPEG quality</label>
+            <input id="uploadJpegQuality" type="number" min="1" max="100" />
+          </div>
+        </div>
+        <p class="tip" style="margin-top:0">
+          Min bytes ignores tiny/corrupt drops. Max edge + quality shrink camera JPEGs before R2 (default 2048px @ 78).
+        </p>
+        <div class="row">
+          <div>
+            <label for="minIntervalMs">Min upload interval (ms)</label>
+            <input id="minIntervalMs" type="number" min="0" />
+          </div>
+          <div>
+            <label for="processConcurrency">Upload concurrency</label>
+            <input id="processConcurrency" type="number" min="1" max="4" />
+          </div>
+        </div>
+        <div class="check-row">
+          <label><input id="recursive" type="checkbox" /> Recursive watch</label>
+          <label><input id="keepRejects" type="checkbox" /> Keep rejects</label>
+        </div>
+
+        <p class="section-label">AI enhance &amp; tagging</p>
+        <div class="row">
+          <div>
+            <label for="codeformerWeight">CodeFormer weight</label>
+            <input id="codeformerWeight" type="number" step="0.1" min="0" max="1" />
+          </div>
+          <div>
+            <label for="tagTimeoutMs">Tag / AI timeout (ms)</label>
+            <input id="tagTimeoutMs" type="number" min="30000" step="1000" />
+          </div>
+        </div>
+        <div class="check-row">
+          <label><input id="aiEnabled" type="checkbox" /> CodeFormer enhance</label>
+          <label><input id="depthEnabled" type="checkbox" /> Depth Anything V2</label>
+          <label><input id="captionEnabled" type="checkbox" /> Caption/tags</label>
+          <label><input id="tagQueueEnabled" type="checkbox" /> Tag queue</label>
+        </div>
+        <label>Caption model cascade</label>
+        <div class="check-row" id="tagModels">
+          <label><input type="checkbox" data-model="florence2-ft" /> florence2-ft</label>
+          <label><input type="checkbox" data-model="moondream2" /> moondream2</label>
+          <label><input type="checkbox" data-model="smolvlm2" /> smolvlm2</label>
+        </div>
+        <p class="tip" style="margin-top:0">Checked models run in listed order until one succeeds.</p>
+
+        <div class="actions">
+          <button id="saveBtn" type="button">Save settings</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <details class="reject-panel" id="rejectDetails">
+          <summary>
+            <span class="summary-title">Rejected photos</span>
+            <span class="summary-meta" id="rejectSummaryMeta">0</span>
+          </summary>
+          <p class="tip" id="rejectTip" style="margin-top:0.75rem">
+            Burst cull keeps only the best frame(s) among near-equal camera names in each drop window.
+            Unrelated filenames upload separately. Force upload skips cull.
+          </p>
+          <div class="actions" style="margin-top:0.5rem">
+            <button id="openRejectsBtn" class="secondary" type="button">Open rejected folder</button>
+          </div>
+          <div class="reject-grid" id="rejectGrid"></div>
+        </details>
+      </section>
+
+      <section class="panel">
+        <label>Live log</label>
+        <div class="logs" id="logs"></div>
+      </section>
+    </main>
+    <script>
+      const TAG_MODEL_ORDER = ["florence2-ft", "moondream2", "smolvlm2"];
+      const REJECTS_OPEN_KEY = "livelens.rejectsOpen";
+
+      let state = { config: {}, status: {}, presets: {}, rejects: { files: [], count: 0, dir: "" } };
+      let lastSyncedAt = null;
+      let uiError = "";
+      let activePresetId = null;
+      const forceUploading = new Set();
+      let rejectsOpenInitialized = false;
+
+      async function api(path, method = "GET", body) {
+        const res = await fetch(path, {
+          method,
+          headers: body ? { "Content-Type": "application/json" } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Request failed");
+        return data;
+      }
+
+      function setError(message) {
+        uiError = message || "";
+        const el = document.getElementById("statusError");
+        if (!uiError) {
+          el.hidden = true;
+          el.textContent = "";
+          return;
+        }
+        el.hidden = false;
+        el.textContent = uiError;
+      }
+
+      function readTagModels() {
+        const checked = [];
+        document.querySelectorAll("#tagModels input[data-model]").forEach((el) => {
+          if (el.checked) checked.push(el.dataset.model);
+        });
+        return checked.length ? checked : [...TAG_MODEL_ORDER];
+      }
+
+      function writeTagModels(models) {
+        const set = new Set(models || TAG_MODEL_ORDER);
+        document.querySelectorAll("#tagModels input[data-model]").forEach((el) => {
+          el.checked = set.has(el.dataset.model);
+        });
+      }
+
+      function applyStatus(status) {
+        if (!status) return;
+        state.status = status;
+        lastSyncedAt = new Date();
+        render();
+      }
+
+      function syncRejectsOpen(count) {
+        const details = document.getElementById("rejectDetails");
+        if (!rejectsOpenInitialized) {
+          const stored = localStorage.getItem(REJECTS_OPEN_KEY);
+          if (stored === "1" || stored === "0") {
+            details.open = stored === "1";
+          } else {
+            details.open = count > 0;
+          }
+          rejectsOpenInitialized = true;
+        }
+      }
+
+      function render() {
+        const c = state.config || {};
+        const s = state.status || {};
+        const hasRoots = (c.watchRoots || []).length > 0;
+        const uploadPending = s.uploadPending || 0;
+        const aiPending = s.aiPending || 0;
+        document.getElementById("dot").className = "dot" + (s.running ? " on" : "");
+        document.getElementById("runState").textContent = s.running
+          ? `Running · burst ${s.burstPending || 0} · upload ${uploadPending} · AI ${aiPending}`
+          : uploadPending || aiPending
+            ? `Stopped · finishing upload ${uploadPending} / AI ${aiPending}`
+            : "Stopped";
+        document.getElementById("startBtn").disabled = !!s.running || !hasRoots;
+        document.getElementById("stopBtn").disabled = !s.running;
+        document.getElementById("statusMeta").textContent = s.running
+          ? `Watching ${(s.watchRoots || c.watchRoots || []).join(", ") || "configured folders"} · updated ${formatAgo(lastSyncedAt)}`
+          : hasRoots
+            ? `Ready · updated ${formatAgo(lastSyncedAt)}`
+            : "Add a watch folder below, then Start.";
+
+        document.getElementById("extensions").value = (c.extensions || []).join(", ");
+        document.getElementById("ignoreRaw").value = (c.ignoreRaw || []).join(", ");
+        document.getElementById("burstWindowMs").value = c.burstWindowMs ?? 4000;
+        document.getElementById("burstKeep").value = c.burstKeep ?? 1;
+        document.getElementById("burstSeqGap").value = c.burstSeqGap ?? 8;
+        document.getElementById("minFileBytes").value = c.minFileBytes ?? 20480;
+        document.getElementById("uploadMaxEdge").value = c.uploadMaxEdge ?? 2048;
+        document.getElementById("uploadJpegQuality").value = c.uploadJpegQuality ?? 78;
+        document.getElementById("minIntervalMs").value = c.minIntervalMs ?? 0;
+        document.getElementById("processConcurrency").value = c.processConcurrency ?? 2;
+        document.getElementById("codeformerWeight").value = c.codeformerWeight ?? 0.7;
+        document.getElementById("tagTimeoutMs").value = c.tagTimeoutMs ?? 180000;
+        document.getElementById("recursive").checked = !!c.recursive;
+        document.getElementById("keepRejects").checked = c.keepRejects !== false;
+        document.getElementById("aiEnabled").checked = !!c.aiEnabled;
+        document.getElementById("depthEnabled").checked = c.depthEnabled !== false;
+        document.getElementById("captionEnabled").checked = c.captionEnabled !== false;
+        document.getElementById("tagQueueEnabled").checked = c.tagQueueEnabled !== false;
+        writeTagModels(c.tagModels || TAG_MODEL_ORDER);
+        setError(uiError);
+
+        const roots = document.getElementById("roots");
+        roots.innerHTML = "";
+        (c.watchRoots || []).forEach((root, idx) => {
+          const li = document.createElement("li");
+          li.innerHTML = `<span>${root}</span>`;
+          const btn = document.createElement("button");
+          btn.className = "secondary";
+          btn.textContent = "Remove";
+          btn.onclick = async () => {
+            try {
+              const next = [...(state.config.watchRoots || [])];
+              next.splice(idx, 1);
+              await api("/api/config", "POST", { watchRoots: next });
+              setError("");
+              await refresh();
+            } catch (e) {
+              setError(e.message);
+            }
+          };
+          li.appendChild(btn);
+          roots.appendChild(li);
+        });
+
+        const presets = document.getElementById("presets");
+        presets.innerHTML = "";
+        Object.entries(state.presets || {}).forEach(([id, p]) => {
+          const b = document.createElement("button");
+          b.className = "chip" + (activePresetId === id ? " active" : "");
+          b.textContent = p.label;
+          b.onclick = async () => {
+            try {
+              const res = await api("/api/preset", "POST", { id });
+              activePresetId = id;
+              document.getElementById("presetTip").textContent = res.tip || p.tip;
+              const title = document.getElementById("guideTitle");
+              const guide = document.getElementById("presetGuide");
+              title.hidden = false;
+              title.textContent = (res.label || p.label) + " — FTP & setup instructions";
+              guide.hidden = false;
+              guide.textContent = res.guide || p.guide || res.tip || p.tip || "";
+              setError("");
+              await refresh();
+            } catch (e) {
+              setError(e.message);
+            }
+          };
+          presets.appendChild(b);
+        });
+
+        const logs = (s.logs || [])
+          .slice()
+          .reverse()
+          .map((l) => `${l.ts} [${l.level}] ${l.message}`)
+          .join("\n");
+        document.getElementById("logs").textContent = logs || "No events yet.";
+
+        const rejects = state.rejects || { files: [], count: 0, dir: "" };
+        const tip = document.getElementById("rejectTip");
+        const keep = c.burstKeep ?? 1;
+        const windowMs = c.burstWindowMs ?? 4000;
+        const seqGap = c.burstSeqGap ?? 8;
+        tip.textContent = rejects.count
+          ? `${rejects.count} shown · keep ${keep} per ${windowMs}ms · name gap ${seqGap} · ${rejects.dir || "rejected/"}`
+          : `No rejects yet. Near-equal camera names in the same ${windowMs}ms window compete; keep ${keep}.`;
+
+        document.getElementById("rejectSummaryMeta").textContent = rejects.count
+          ? `${rejects.count} file${rejects.count === 1 ? "" : "s"}`
+          : "empty";
+        syncRejectsOpen(rejects.count || 0);
+
+        const grid = document.getElementById("rejectGrid");
+        grid.innerHTML = "";
+        (rejects.files || []).forEach((f) => {
+          const card = document.createElement("div");
+          card.className = "reject-card";
+          const img = document.createElement("img");
+          img.src = f.url;
+          img.alt = f.name;
+          img.loading = "lazy";
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          meta.innerHTML = `<div>${f.name}</div><div class="reason">${f.reason || "Burst cull"}</div>`;
+          const btn = document.createElement("button");
+          btn.className = "small";
+          const busy = forceUploading.has(f.name);
+          btn.disabled = busy;
+          btn.textContent = busy ? "Uploading…" : "Force upload";
+          btn.onclick = () => forceUpload(f.name, btn);
+          meta.appendChild(btn);
+          card.appendChild(img);
+          card.appendChild(meta);
+          grid.appendChild(card);
+        });
+        if (!(rejects.files || []).length) {
+          const empty = document.createElement("p");
+          empty.className = "tip";
+          empty.textContent = "Rejected folder is empty.";
+          grid.appendChild(empty);
+        }
+      }
+
+      async function forceUpload(name, btn) {
+        if (forceUploading.has(name)) return;
+        forceUploading.add(name);
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Uploading…";
+        }
+        try {
+          const res = await api("/api/rejects/force-upload", "POST", { name });
+          setError("");
+          document.getElementById("statusMeta").textContent = `Force uploaded · ${res.url || name}`;
+          await refresh();
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          forceUploading.delete(name);
+          render();
+        }
+      }
+
+      function formatAgo(date) {
+        if (!date) return "never";
+        const sec = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+        if (sec < 2) return "just now";
+        if (sec < 60) return `${sec}s ago`;
+        return date.toLocaleTimeString();
+      }
+
+      async function refresh() {
+        const data = await api("/api/status");
+        state = data;
+        lastSyncedAt = new Date();
+        render();
+      }
+
+      async function pickWatchFolder() {
+        const res = await api("/api/pick-folder", "POST", {});
+        if (res.cancelled || !res.path) return null;
+        document.getElementById("newRoot").value = res.path;
+        return res.path;
+      }
+
+      async function addWatchFolder(path) {
+        const roots = [...(state.config.watchRoots || [])];
+        if (roots.includes(path)) {
+          setError("That folder is already in the list.");
+          return;
+        }
+        roots.push(path);
+        await api("/api/config", "POST", { watchRoots: roots });
+        document.getElementById("newRoot").value = "";
+        setError("");
+        await refresh();
+      }
+
+      document.getElementById("rejectDetails").addEventListener("toggle", (e) => {
+        localStorage.setItem(REJECTS_OPEN_KEY, e.target.open ? "1" : "0");
+      });
+
+      document.getElementById("pickRoot").onclick = async () => {
+        try {
+          setError("");
+          await pickWatchFolder();
+        } catch (e) {
+          setError(e.message);
+        }
+      };
+
+      document.getElementById("addRoot").onclick = async () => {
+        try {
+          let path = document.getElementById("newRoot").value.trim();
+          if (!path) {
+            path = await pickWatchFolder();
+            if (!path) return;
+          }
+          await addWatchFolder(path);
+        } catch (e) {
+          setError(e.message);
+        }
+      };
+
+      document.getElementById("saveBtn").onclick = async () => {
+        try {
+          await api("/api/config", "POST", {
+            extensions: document
+              .getElementById("extensions")
+              .value.split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            ignoreRaw: document
+              .getElementById("ignoreRaw")
+              .value.split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            burstWindowMs: Number(document.getElementById("burstWindowMs").value),
+            burstKeep: Number(document.getElementById("burstKeep").value),
+            burstSeqGap: Number(document.getElementById("burstSeqGap").value),
+            minFileBytes: Number(document.getElementById("minFileBytes").value),
+            uploadMaxEdge: Number(document.getElementById("uploadMaxEdge").value),
+            uploadJpegQuality: Number(document.getElementById("uploadJpegQuality").value),
+            minIntervalMs: Number(document.getElementById("minIntervalMs").value),
+            processConcurrency: Number(document.getElementById("processConcurrency").value),
+            codeformerWeight: Number(document.getElementById("codeformerWeight").value),
+            tagTimeoutMs: Number(document.getElementById("tagTimeoutMs").value),
+            recursive: document.getElementById("recursive").checked,
+            keepRejects: document.getElementById("keepRejects").checked,
+            aiEnabled: document.getElementById("aiEnabled").checked,
+            depthEnabled: document.getElementById("depthEnabled").checked,
+            captionEnabled: document.getElementById("captionEnabled").checked,
+            tagQueueEnabled: document.getElementById("tagQueueEnabled").checked,
+            tagModels: readTagModels(),
+          });
+          setError("");
+          await refresh();
+        } catch (e) {
+          setError(e.message);
+        }
+      };
+
+      document.getElementById("startBtn").onclick = async () => {
+        try {
+          const res = await api("/api/start", "POST", {});
+          setError("");
+          applyStatus(res.status);
+          await refresh();
+        } catch (e) {
+          setError(e.message);
+          await refresh().catch(() => {});
+        }
+      };
+      document.getElementById("stopBtn").onclick = async () => {
+        try {
+          const res = await api("/api/stop", "POST", {});
+          setError("");
+          applyStatus(res.status);
+          await refresh();
+        } catch (e) {
+          setError(e.message);
+        }
+      };
+      document.getElementById("refreshBtn").onclick = async () => {
+        try {
+          setError("");
+          await refresh();
+        } catch (e) {
+          setError(e.message);
+        }
+      };
+
+      document.getElementById("openRejectsBtn").onclick = async () => {
+        try {
+          await api("/api/rejects/open", "POST", {});
+          setError("");
+        } catch (e) {
+          setError(e.message);
+        }
+      };
+
+      refresh().catch((e) => setError(e.message));
+      setInterval(() => {
+        refresh().catch(() => {});
+      }, 3000);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "livelens-engine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "watcher": "node watcher.js",
+    "tag-queue": "node tag-queue.js",
+    "backfill-tags": "node backfill-tags.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.758.0",
+    "@supabase/supabase-js": "^2.49.1",
+    "chokidar": "^4.0.3",
+    "dotenv": "^16.4.7",
+    "p-queue": "^8.1.0"
+  }
+}
