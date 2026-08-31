@@ -4,6 +4,20 @@ export type GuestUploadMode = "open" | "moderated" | "invite_code";
 export type MediaTag = "dancing" | "portrait" | "group" | "food" | "other" | "wish";
 export type LiveDisplayMode = "normal" | "video" | "wish";
 
+export type SocialPlatform =
+  | "instagram"
+  | "facebook"
+  | "tiktok"
+  | "youtube"
+  | "x"
+  | "website"
+  | "whatsapp";
+
+export type SocialLink = {
+  platform: SocialPlatform;
+  url: string;
+};
+
 export type MediaRow = {
   id: string;
   url: string;
@@ -34,6 +48,11 @@ export type EventSettings = {
   live_display_mode: LiveDisplayMode;
   live_sync_enabled: boolean;
   live_rotation_epoch: string;
+  live_cta_enabled: boolean;
+  live_cta_on_empty: boolean;
+  live_cta_on_loop: boolean;
+  live_cta_every_n: number;
+  live_cta_interval_sec: number;
   couple_names: string | null;
   event_title: string | null;
   event_date: string | null;
@@ -41,6 +60,10 @@ export type EventSettings = {
   venue_address: string | null;
   hero_image_url: string | null;
   welcome_message: string | null;
+  wish_prompt: string | null;
+  event_social_links: SocialLink[];
+  promo_social_links: SocialLink[];
+  promo_logo_url: string | null;
   invite_code_prefix: string | null;
   updated_at: string;
 };

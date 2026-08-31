@@ -727,6 +727,11 @@ export function WishCamera({ settings }: Props) {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/80 to-transparent" />
 
       <div className="absolute inset-x-0 bottom-10 z-20 flex flex-col items-center gap-3">
+        {settings.wish_prompt?.trim() && !recording ? (
+          <p className="max-w-sm px-4 text-center text-sm leading-snug text-[#e8d5b5]">
+            {settings.wish_prompt.trim()}
+          </p>
+        ) : null}
         <p className="text-sm text-white/70">
           {!cameraReady
             ? "Enable the camera to send a wish"

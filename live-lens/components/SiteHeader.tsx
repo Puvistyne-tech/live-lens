@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GalleryIcon, LiveIcon, ShareIcon } from "@/components/GuestNavIcons";
 
 type Props = {
   /** Extra classes on the outer nav row */
@@ -22,14 +23,17 @@ export function SiteHeader({
         LiveLens
       </Link>
       {links && (
-        <div className="flex flex-wrap gap-4">
-          <Link href="/gallery" className="hover:text-white">
+        <div className="flex flex-wrap items-center gap-4">
+          <Link href="/gallery" className="inline-flex items-center gap-1.5 hover:text-white">
+            <GalleryIcon className="h-4 w-4" />
             Gallery
           </Link>
-          <Link href="/upload" className="hover:text-white">
+          <Link href="/upload" className="inline-flex items-center gap-1.5 hover:text-white">
+            <ShareIcon className="h-4 w-4" />
             Share
           </Link>
-          <Link href="/live" className="hover:text-white">
+          <Link href="/live" className="inline-flex items-center gap-1.5 hover:text-white">
+            <LiveIcon className="h-4 w-4" />
             Live
           </Link>
         </div>

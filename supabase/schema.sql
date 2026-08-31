@@ -41,6 +41,11 @@ create table public.event_settings (
     check (live_display_mode in ('normal', 'video', 'wish')),
   live_sync_enabled boolean not null default true,
   live_rotation_epoch timestamptz not null default now(),
+  live_cta_enabled boolean not null default true,
+  live_cta_on_empty boolean not null default true,
+  live_cta_on_loop boolean not null default true,
+  live_cta_every_n integer not null default 0,
+  live_cta_interval_sec integer not null default 0,
   couple_names text,
   event_title text,
   event_date text,
@@ -48,6 +53,10 @@ create table public.event_settings (
   venue_address text,
   hero_image_url text,
   welcome_message text,
+  wish_prompt text,
+  event_social_links jsonb not null default '[]'::jsonb,
+  promo_social_links jsonb not null default '[]'::jsonb,
+  promo_logo_url text,
   invite_code_prefix text,
   updated_at timestamptz not null default now()
 );

@@ -5,9 +5,11 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { SiteQr } from "@/components/SiteQr";
+import { SocialLinksRow } from "@/components/SocialLinksRow";
 import { preloadLiveMedia } from "@/lib/media-preload";
+import { normalizeSocialLinks } from "@/lib/social";
 import { createBrowserSupabase } from "@/lib/supabase/client";
-import type { EventSettings, LiveDisplayMode, MediaRow } from "@/lib/types";
+import type { EventSettings, LiveDisplayMode, MediaRow, SocialLink } from "@/lib/types";
 
 const DepthParallax = dynamic(
   () => import("@/components/DepthParallax").then((m) => m.DepthParallax),
@@ -20,11 +22,17 @@ const KEN_BURNS_MS = 6500;
 const SWAP_EASE = [0.22, 1, 0.36, 1] as const;
 const KEN_BURNS_SCALE = 1.08;
 const KEN_BURNS_PAN_PCT = 3.5;
+const CTA_QR_SIZE = 300;
+const CTA_FALLBACK = "Scan to share your moments";
 
 type Props = {
   initialItems: MediaRow[];
   settings: EventSettings | null;
 };
+
+type LiveSlide =
+  | { kind: "media"; item: MediaRow }
+  | { kind: "cta" };
 
 function mutedByMode(mode: LiveDisplayMode | undefined) {
   return mode !== "video";
@@ -36,6 +44,12 @@ function syncedIndex(epochIso: string | undefined, length: number): number {
   const origin = Number.isFinite(epochMs) ? epochMs : Date.now();
   const elapsed = Math.max(0, Date.now() - origin);
   return Math.floor(elapsed / HOLD_MS) % length;
+}
+
+function elapsedHoldSlots(epochIso: string | undefined): number {
+  const epochMs = epochIso ? Date.parse(epochIso) : Date.now();
+  const origin = Number.isFinite(epochMs) ? epochMs : Date.now();
+  return Math.floor(Math.max(0, Date.now() - origin) / HOLD_MS);
 }
 
 function filterLiveItems(items: MediaRow[], liveSettings: EventSettings | null): MediaRow[] {
@@ -55,6 +69,39 @@ function filterLiveItems(items: MediaRow[], liveSettings: EventSettings | null):
   });
 }
 
+/** Virtual playlist: media + CTA slots from every_n / on_loop. */
+function buildLiveSlides(media: MediaRow[], liveSettings: EventSettings | null): LiveSlide[] {
+  if (!media.length) return [];
+  const enabled = liveSettings?.live_cta_enabled ?? true;
+  if (!enabled) return media.map((item) => ({ kind: "media" as const, item }));
+
+  const everyN = liveSettings?.live_cta_every_n ?? 0;
+  const onLoop = liveSettings?.live_cta_on_loop ?? true;
+  const slides: LiveSlide[] = [];
+
+  media.forEach((item, i) => {
+    slides.push({ kind: "media", item });
+    const n = i + 1;
+    if (everyN > 0 && n % everyN === 0) {
+      slides.push({ kind: "cta" });
+    }
+  });
+
+  if (onLoop) {
+    const last = slides[slides.length - 1];
+    if (!last || last.kind !== "cta") slides.push({ kind: "cta" });
+  }
+
+  return slides;
+}
+
+function intervalForcesCta(epochIso: string | undefined, intervalSec: number): boolean {
+  if (intervalSec <= 0) return false;
+  const intervalSlots = Math.max(1, Math.round((intervalSec * 1000) / HOLD_MS));
+  const slot = elapsedHoldSlots(epochIso);
+  return slot % intervalSlots === 0;
+}
+
 function objectPosition(item: MediaRow) {
   const x = item.focal_x != null ? Math.round(item.focal_x * 100) : 50;
   const y = item.focal_y != null ? Math.round(item.focal_y * 100) : 50;
@@ -71,7 +118,6 @@ function hashUnit(id: string, salt: number): number {
 function kenBurnsTarget(item: MediaRow): { scale: number; x: string; y: string } {
   const fx = item.focal_x ?? 0.35 + hashUnit(item.id, 7) * 0.3;
   const fy = item.focal_y ?? 0.35 + hashUnit(item.id, 13) * 0.3;
-  // Pan opposite the focal offset so the subject drifts toward frame center.
   const x = Math.max(-KEN_BURNS_PAN_PCT, Math.min(KEN_BURNS_PAN_PCT, (0.5 - fx) * KEN_BURNS_PAN_PCT * 2));
   const y = Math.max(-KEN_BURNS_PAN_PCT, Math.min(KEN_BURNS_PAN_PCT, (0.5 - fy) * KEN_BURNS_PAN_PCT * 2));
   return { scale: KEN_BURNS_SCALE, x: `${x}%`, y: `${y}%` };
@@ -105,23 +151,105 @@ function KenBurnsFrame({
   );
 }
 
+function ShareCtaSlide({
+  heroUrl,
+  prompt,
+  eventSocial,
+  reducedMotion,
+}: {
+  heroUrl: string | null;
+  prompt: string;
+  eventSocial: SocialLink[];
+  reducedMotion: boolean;
+}) {
+  const swapTransition = reducedMotion
+    ? { duration: 0.4, ease: SWAP_EASE }
+    : { duration: 0.85, ease: SWAP_EASE };
+  const slideInitial = reducedMotion
+    ? { opacity: 0 }
+    : { opacity: 0, filter: "blur(12px)" };
+  const slideAnimate = reducedMotion
+    ? { opacity: 1 }
+    : { opacity: 1, filter: "blur(0px)" };
+  const slideExit = reducedMotion
+    ? { opacity: 0 }
+    : { opacity: 0, filter: "blur(10px)" };
+
+  return (
+    <motion.div
+      key="share-cta"
+      className="absolute inset-0 overflow-hidden"
+      initial={slideInitial}
+      animate={slideAnimate}
+      exit={slideExit}
+      transition={swapTransition}
+    >
+      {heroUrl ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={heroUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/65 to-black/80" />
+        </>
+      ) : (
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,#2a2430_0%,transparent_40%),radial-gradient(circle_at_90%_0%,#1a2430_0%,transparent_35%)]" />
+      )}
+      <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-6 px-6 text-center">
+        <p
+          className={`max-w-2xl text-white/90 ${
+            reducedMotion
+              ? "text-xl sm:text-2xl"
+              : "font-display text-2xl leading-snug sm:text-3xl md:text-4xl"
+          }`}
+        >
+          {prompt}
+        </p>
+        <SiteQr size={CTA_QR_SIZE} label="Scan to join" />
+        {eventSocial.length > 0 && (
+          <SocialLinksRow links={eventSocial} className="mt-2" size="lg" />
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 export function LiveWall({ initialItems, settings }: Props) {
   const [items, setItems] = useState(initialItems);
   const [index, setIndex] = useState(0);
   const [liveSettings, setLiveSettings] = useState(settings);
   const [muted, setMuted] = useState(mutedByMode(settings?.live_display_mode));
+  const [, setClockTick] = useState(0);
   const reducedMotion = useReducedMotion() ?? false;
 
   const syncEnabled = liveSettings?.live_sync_enabled ?? true;
+  const ctaEnabled = liveSettings?.live_cta_enabled ?? true;
+  const ctaOnEmpty = liveSettings?.live_cta_on_empty ?? true;
+  const intervalSec = liveSettings?.live_cta_interval_sec ?? 0;
 
   const visible = useMemo(
     () => filterLiveItems(items, liveSettings),
     [items, liveSettings],
   );
 
-  const current = visible.length ? visible[index % visible.length] : undefined;
+  const slides = useMemo(
+    () => buildLiveSlides(visible, liveSettings),
+    [visible, liveSettings],
+  );
+
+  const emptyShowCta = visible.length === 0 && ctaEnabled && ctaOnEmpty;
+  const intervalCta =
+    visible.length > 0 &&
+    ctaEnabled &&
+    intervalForcesCta(liveSettings?.live_rotation_epoch, intervalSec);
+
+  const slide = slides.length ? slides[index % slides.length] : undefined;
+  const showingCta = emptyShowCta || intervalCta || slide?.kind === "cta";
+  const current = !showingCta && slide?.kind === "media" ? slide.item : undefined;
 
   const couple = liveSettings?.couple_names?.trim();
+  const heroUrl = liveSettings?.hero_image_url?.trim() || null;
+  const ctaPrompt = liveSettings?.wish_prompt?.trim() || CTA_FALLBACK;
+  const eventSocial = normalizeSocialLinks(liveSettings?.event_social_links);
+
   const isWish = current?.tag?.toLowerCase() === "wish";
   const uploaderLabel = (() => {
     const raw = current?.uploader_name?.trim();
@@ -130,6 +258,12 @@ export function LiveWall({ initialItems, settings }: Props) {
     return raw;
   })();
   const showOverlay = Boolean(current?.caption?.trim() || uploaderLabel || isWish);
+
+  useEffect(() => {
+    if (!ctaEnabled || intervalSec <= 0) return;
+    const id = setInterval(() => setClockTick((t) => t + 1), SYNC_TICK_MS);
+    return () => clearInterval(id);
+  }, [ctaEnabled, intervalSec]);
 
   useEffect(() => {
     const supabase = createBrowserSupabase();
@@ -171,24 +305,25 @@ export function LiveWall({ initialItems, settings }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!visible.length) return;
+    if (!slides.length) return;
     if (syncEnabled) {
       const tick = () => {
-        setIndex(syncedIndex(liveSettings?.live_rotation_epoch, visible.length));
+        setIndex(syncedIndex(liveSettings?.live_rotation_epoch, slides.length));
       };
       tick();
       const id = setInterval(tick, SYNC_TICK_MS);
       return () => clearInterval(id);
     }
-    if (visible.length <= 1) return;
+    if (slides.length <= 1) return;
     const id = setInterval(() => setIndex((i) => i + 1), HOLD_MS);
     return () => clearInterval(id);
-  }, [visible.length, syncEnabled, liveSettings?.live_rotation_epoch]);
+  }, [slides.length, syncEnabled, liveSettings?.live_rotation_epoch]);
 
   useEffect(() => {
-    if (!visible.length) return;
-    preloadLiveMedia(visible, index % visible.length);
-  }, [visible, index]);
+    if (!visible.length || showingCta) return;
+    const mediaIndex = visible.findIndex((m) => m.id === current?.id);
+    if (mediaIndex >= 0) preloadLiveMedia(visible, mediaIndex);
+  }, [visible, current?.id, showingCta]);
 
   const swapTransition = reducedMotion
     ? { duration: 0.4, ease: SWAP_EASE }
@@ -206,9 +341,18 @@ export function LiveWall({ initialItems, settings }: Props) {
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-[#0b0c10] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,#2a2430_0%,transparent_40%),radial-gradient(circle_at_90%_0%,#1a2430_0%,transparent_35%)]" />
+      {!showingCta && (
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,#2a2430_0%,transparent_40%),radial-gradient(circle_at_90%_0%,#1a2430_0%,transparent_35%)]" />
+      )}
       <AnimatePresence mode="wait">
-        {current ? (
+        {showingCta ? (
+          <ShareCtaSlide
+            heroUrl={heroUrl}
+            prompt={ctaPrompt}
+            eventSocial={eventSocial}
+            reducedMotion={reducedMotion}
+          />
+        ) : current ? (
           <motion.div
             key={current.id}
             className="absolute inset-0 overflow-hidden"
@@ -260,7 +404,7 @@ export function LiveWall({ initialItems, settings }: Props) {
         )}
       </AnimatePresence>
 
-      {showOverlay && current && (
+      {showOverlay && current && !showingCta && (
         <div className="pointer-events-none absolute inset-x-0 bottom-24 z-10 flex justify-center px-6 sm:bottom-28">
           <div className="max-w-3xl rounded-2xl bg-black/45 px-5 py-4 text-center backdrop-blur-sm">
             {isWish && (
@@ -278,7 +422,7 @@ export function LiveWall({ initialItems, settings }: Props) {
         </div>
       )}
 
-      {current?.media_type === "video" && (
+      {current?.media_type === "video" && !showingCta && (
         <button
           type="button"
           className="absolute right-4 top-4 z-30 rounded-full border border-white/25 bg-black/50 px-4 py-2 text-sm text-white/90 backdrop-blur hover:bg-black/70 sm:right-6 sm:top-6"
@@ -288,17 +432,21 @@ export function LiveWall({ initialItems, settings }: Props) {
         </button>
       )}
 
-      <div className="absolute bottom-4 left-4 z-20 flex items-end gap-3 text-xs text-white/50 sm:text-sm">
-        <Link href="/" className="hover:text-white/80">
-          {couple || "LiveLens"}
-        </Link>
-        <span>·</span>
-        <span>{visible.length} live</span>
-      </div>
+      {!showingCta && (
+        <div className="absolute bottom-4 left-4 z-20 flex items-end gap-3 text-xs text-white/50 sm:text-sm">
+          <Link href="/" className="hover:text-white/80">
+            {couple || "LiveLens"}
+          </Link>
+          <span>·</span>
+          <span>{visible.length} live</span>
+        </div>
+      )}
 
-      <div className="absolute bottom-4 right-4 z-20 sm:bottom-6 sm:right-6">
-        <SiteQr size={112} label="Join & upload" />
-      </div>
+      {!showingCta && (
+        <div className="absolute bottom-4 right-4 z-20 sm:bottom-6 sm:right-6">
+          <SiteQr size={112} label="Join & upload" />
+        </div>
+      )}
     </div>
   );
 }

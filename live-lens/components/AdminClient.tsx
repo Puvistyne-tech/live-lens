@@ -19,6 +19,14 @@ import {
   type AdminMediaTagFilter,
   type MediaCursor,
 } from "@/app/actions";
+import { SocialPlatformIcon } from "@/components/SocialIcons";
+import {
+  SOCIAL_PLATFORM_LABELS,
+  SOCIAL_PLATFORMS,
+  canAddSocialLink,
+  defaultSocialPlatform,
+  isSocialPlatform,
+} from "@/lib/social";
 import type {
   EventSettings,
   GuestUploadMode,
@@ -26,6 +34,7 @@ import type {
   MediaRow,
   MediaSource,
   MediaType,
+  SocialLink,
   UploadCode,
 } from "@/lib/types";
 
@@ -45,6 +54,161 @@ type ChipProps = {
   onClick: () => void;
   count?: number;
 };
+
+const PHOTO_MB_PRESETS = [2, 5, 10, 20] as const;
+const VIDEO_MB_PRESETS = [10, 25, 50, 100] as const;
+const VIDEO_SECONDS_PRESETS = [5, 10, 15, 30, 60] as const;
+const CUSTOM = "__custom__";
+
+function SocialLinksEditor({
+  links,
+  onChange,
+}: {
+  links: SocialLink[];
+  onChange: (next: SocialLink[]) => void;
+}) {
+  function updateAt(index: number, patch: Partial<SocialLink>) {
+    onChange(
+      links.map((link, i) => {
+        if (i !== index) return link;
+        return { ...link, ...patch };
+      }),
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      {links.map((link, index) => (
+        <div key={index} className="flex flex-wrap items-end gap-2 sm:flex-nowrap">
+          <label className="w-full text-sm sm:w-44 sm:shrink-0">
+            <span className="mb-1 flex items-center gap-2 text-white/70">
+              <SocialPlatformIcon platform={link.platform} className="h-4 w-4" />
+              Platform
+            </span>
+            <select
+              className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+              value={link.platform}
+              onChange={(e) => {
+                const platform = e.target.value;
+                if (!isSocialPlatform(platform)) return;
+                updateAt(index, { platform });
+              }}
+            >
+              {SOCIAL_PLATFORMS.map((platform) => (
+                <option key={platform} value={platform}>
+                  {SOCIAL_PLATFORM_LABELS[platform]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-0 flex-1 text-sm">
+            URL
+            <input
+              className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+              type="url"
+              inputMode="url"
+              placeholder="https://"
+              value={link.url}
+              onChange={(e) => updateAt(index, { url: e.target.value })}
+            />
+          </label>
+          <button
+            type="button"
+            className="rounded-full border border-white/20 px-3 py-2 text-sm text-white/70 hover:border-white/40 hover:text-white"
+            onClick={() => onChange(links.filter((_, i) => i !== index))}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      {canAddSocialLink(links) && (
+        <button
+          type="button"
+          className="rounded-full border border-dashed border-white/25 px-4 py-2 text-sm text-white/70 hover:border-white/45 hover:text-white"
+          onClick={() =>
+            onChange([...links, { platform: defaultSocialPlatform(links), url: "" }])
+          }
+        >
+          Add link
+        </button>
+      )}
+    </div>
+  );
+}
+
+function bytesToMb(bytes: number) {
+  return Math.round((bytes / (1024 * 1024)) * 100) / 100;
+}
+
+function mbToBytes(mb: number) {
+  return Math.round(mb * 1024 * 1024);
+}
+
+function SizeSelect({
+  label,
+  value,
+  presets,
+  unit,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  presets: readonly number[];
+  unit: string;
+  min?: number;
+  max?: number;
+  onChange: (next: number) => void;
+}) {
+  const isPreset = presets.some((p) => p === value);
+  const [customMode, setCustomMode] = useState(!isPreset);
+  const showCustom = customMode || !isPreset;
+  const selectValue = showCustom ? CUSTOM : String(value);
+
+  return (
+    <label className="text-sm">
+      {label}
+      <select
+        className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+        value={selectValue}
+        onChange={(e) => {
+          if (e.target.value === CUSTOM) {
+            setCustomMode(true);
+            return;
+          }
+          setCustomMode(false);
+          onChange(Number(e.target.value));
+        }}
+      >
+        {presets.map((p) => (
+          <option key={p} value={p}>
+            {p} {unit}
+          </option>
+        ))}
+        <option value={CUSTOM}>Custom…</option>
+      </select>
+      {showCustom ? (
+        <input
+          type="number"
+          min={min}
+          max={max}
+          step={unit === "MB" ? 0.1 : 1}
+          className="mt-2 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+          value={value}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (!Number.isFinite(n)) return;
+            let next = n;
+            if (min != null) next = Math.max(min, next);
+            if (max != null) next = Math.min(max, next);
+            onChange(next);
+          }}
+        />
+      ) : null}
+    </label>
+  );
+}
 
 function Chip({ label, active, onClick, count }: ChipProps) {
   return (
@@ -166,9 +330,11 @@ export function AdminClient({
   const [hours, setHours] = useState(6);
   const [autoApprove, setAutoApprove] = useState(false);
   const [heroBusy, setHeroBusy] = useState(false);
+  const [promoLogoBusy, setPromoLogoBusy] = useState(false);
   const [liveSettingsError, setLiveSettingsError] = useState<string | null>(null);
 
   const [savingBranding, setSavingBranding] = useState(false);
+  const [savingWishPrompt, setSavingWishPrompt] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingPrefix, setSavingPrefix] = useState(false);
   const [codeBusy, setCodeBusy] = useState(false);
@@ -279,6 +445,27 @@ export function AdminClient({
     }
   }
 
+  async function onPromoLogoFile(file: File | null) {
+    if (!file) return;
+    setPromoLogoBusy(true);
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      const res = await fetch("/api/admin/promo-logo", { method: "POST", body: form });
+      const data = (await res.json()) as { error?: string; url?: string };
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      if (data.url) {
+        setLocalSettings((s) => ({ ...s, promo_logo_url: data.url! }));
+        toast.success("Promo logo uploaded");
+        router.refresh();
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setPromoLogoBusy(false);
+    }
+  }
+
   async function saveBranding() {
     setSavingBranding(true);
     try {
@@ -289,6 +476,21 @@ export function AdminClient({
       toast.error(err instanceof Error ? err.message : "Failed to save branding");
     } finally {
       setSavingBranding(false);
+    }
+  }
+
+  async function saveWishPrompt() {
+    setSavingWishPrompt(true);
+    try {
+      await updateSettingsAction({
+        wish_prompt: localSettings.wish_prompt,
+      });
+      toast.success("Wish prompt saved");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save wish prompt");
+    } finally {
+      setSavingWishPrompt(false);
     }
   }
 
@@ -598,6 +800,80 @@ export function AdminClient({
                 }
               />
             </label>
+            <div className="sm:col-span-2">
+              <h3 className="text-base text-white/90">Event social</h3>
+              <p className="mt-1 text-sm text-white/50">
+                Optional links for the couple or event. Shown on the home page and upload when set.
+              </p>
+              <SocialLinksEditor
+                links={localSettings.event_social_links ?? []}
+                onChange={(event_social_links) =>
+                  setLocalSettings((s) => ({ ...s, event_social_links }))
+                }
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <h3 className="text-base text-white/90">Promo / studio</h3>
+              <p className="mt-1 text-sm text-white/50">
+                Promotion links and logo (e.g. photographer). Logo appears bottom-left on home and
+                upload when set.
+              </p>
+              <div className="mt-3 space-y-3">
+                <p className="text-sm text-white/80">Logo</p>
+                {localSettings.promo_logo_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={localSettings.promo_logo_url}
+                    alt=""
+                    className="h-16 max-w-[200px] rounded-lg bg-black/40 object-contain p-2"
+                  />
+                )}
+                <label className="inline-flex cursor-pointer rounded-full border border-white/20 px-4 py-2 text-sm hover:border-white/40">
+                  {promoLogoBusy ? "Uploading…" : "Upload logo"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={promoLogoBusy}
+                    onChange={(e) => {
+                      void onPromoLogoFile(e.target.files?.[0] || null);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                <label className="block text-sm">
+                  Or paste logo URL
+                  <input
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+                    value={localSettings.promo_logo_url ?? ""}
+                    onChange={(e) =>
+                      setLocalSettings((s) => ({
+                        ...s,
+                        promo_logo_url: e.target.value || null,
+                      }))
+                    }
+                    placeholder="https://… (R2 public URL)"
+                  />
+                </label>
+                {localSettings.promo_logo_url && (
+                  <button
+                    type="button"
+                    className="text-sm text-white/55 underline-offset-2 hover:text-white/80 hover:underline"
+                    onClick={() =>
+                      setLocalSettings((s) => ({ ...s, promo_logo_url: null }))
+                    }
+                  >
+                    Clear logo
+                  </button>
+                )}
+              </div>
+              <SocialLinksEditor
+                links={localSettings.promo_social_links ?? []}
+                onChange={(promo_social_links) =>
+                  setLocalSettings((s) => ({ ...s, promo_social_links }))
+                }
+              />
+            </div>
           </div>
           <button
             className="mt-4 rounded-full bg-[#c4a574] px-4 py-2 text-[#1a140c] disabled:opacity-50"
@@ -605,6 +881,40 @@ export function AdminClient({
             onClick={() => void saveBranding()}
           >
             {savingBranding ? "Saving…" : "Save branding"}
+          </button>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <h2 className="text-xl">Wish prompt</h2>
+          <p className="mt-1 text-sm text-white/50">
+            Shown on the wish camera when set. Also used as the message on the live share CTA.
+            Leave blank to hide on wish and use the default CTA line on live.
+          </p>
+          <label className="mt-4 block text-sm">
+            Prompt
+            <textarea
+              className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+              rows={3}
+              maxLength={200}
+              value={localSettings.wish_prompt ?? ""}
+              onChange={(e) =>
+                setLocalSettings((s) => ({
+                  ...s,
+                  wish_prompt: e.target.value.slice(0, 200) || null,
+                }))
+              }
+              placeholder="Even from afar, your love belongs here — leave a short wish for the couple."
+            />
+            <span className="mt-1 block text-xs text-white/40">
+              {(localSettings.wish_prompt ?? "").length}/200
+            </span>
+          </label>
+          <button
+            className="mt-4 rounded-full bg-[#c4a574] px-4 py-2 text-[#1a140c] disabled:opacity-50"
+            disabled={savingWishPrompt}
+            onClick={() => void saveWishPrompt()}
+          >
+            {savingWishPrompt ? "Saving…" : "Save wish prompt"}
           </button>
         </section>
 
@@ -638,41 +948,37 @@ export function AdminClient({
                 <option value="invite_code">Invite code</option>
               </select>
             </label>
-            <label className="text-sm">
-              Max photo bytes
-              <input
-                type="number"
-                className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
-                value={localSettings.max_photo_bytes}
-                onChange={(e) =>
-                  setLocalSettings((s) => ({ ...s, max_photo_bytes: Number(e.target.value) }))
-                }
-              />
-            </label>
-            <label className="text-sm">
-              Max video bytes
-              <input
-                type="number"
-                className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
-                value={localSettings.max_video_bytes}
-                onChange={(e) =>
-                  setLocalSettings((s) => ({ ...s, max_video_bytes: Number(e.target.value) }))
-                }
-              />
-            </label>
-            <label className="text-sm">
-              Max guest / wish video (seconds)
-              <input
-                type="number"
-                min={1}
-                max={60}
-                className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
-                value={localSettings.max_video_seconds}
-                onChange={(e) =>
-                  setLocalSettings((s) => ({ ...s, max_video_seconds: Number(e.target.value) }))
-                }
-              />
-            </label>
+            <SizeSelect
+              label="Max photo size"
+              value={bytesToMb(localSettings.max_photo_bytes)}
+              presets={PHOTO_MB_PRESETS}
+              unit="MB"
+              min={0.1}
+              onChange={(mb) =>
+                setLocalSettings((s) => ({ ...s, max_photo_bytes: mbToBytes(mb) }))
+              }
+            />
+            <SizeSelect
+              label="Max video size"
+              value={bytesToMb(localSettings.max_video_bytes)}
+              presets={VIDEO_MB_PRESETS}
+              unit="MB"
+              min={0.1}
+              onChange={(mb) =>
+                setLocalSettings((s) => ({ ...s, max_video_bytes: mbToBytes(mb) }))
+              }
+            />
+            <SizeSelect
+              label="Max video length"
+              value={localSettings.max_video_seconds}
+              presets={VIDEO_SECONDS_PRESETS}
+              unit="seconds"
+              min={1}
+              max={60}
+              onChange={(seconds) =>
+                setLocalSettings((s) => ({ ...s, max_video_seconds: Math.round(seconds) }))
+              }
+            />
             <label className="text-sm sm:col-span-2">
               Live mode
               <select
@@ -709,6 +1015,76 @@ export function AdminClient({
               />
               Mix guest videos into /live (Normal mode only)
             </label>
+            <label className="flex items-center gap-3 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={localSettings.live_cta_enabled ?? true}
+                onChange={(e) =>
+                  setLocalSettings((s) => ({ ...s, live_cta_enabled: e.target.checked }))
+                }
+              />
+              Show share CTA on live
+            </label>
+            {(localSettings.live_cta_enabled ?? true) && (
+              <div className="grid gap-3 rounded-xl border border-white/10 bg-black/20 p-4 sm:col-span-2 sm:grid-cols-2">
+                <label className="flex items-center gap-3 text-sm sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.live_cta_on_empty ?? true}
+                    onChange={(e) =>
+                      setLocalSettings((s) => ({ ...s, live_cta_on_empty: e.target.checked }))
+                    }
+                  />
+                  When queue is empty
+                </label>
+                <label className="flex items-center gap-3 text-sm sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.live_cta_on_loop ?? true}
+                    onChange={(e) =>
+                      setLocalSettings((s) => ({ ...s, live_cta_on_loop: e.target.checked }))
+                    }
+                  />
+                  Once per playlist loop
+                </label>
+                <label className="text-sm">
+                  Every N slides (0 = off)
+                  <input
+                    type="number"
+                    min={0}
+                    max={60}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+                    value={localSettings.live_cta_every_n ?? 0}
+                    onChange={(e) =>
+                      setLocalSettings((s) => ({
+                        ...s,
+                        live_cta_every_n: Math.max(0, Math.min(60, Number(e.target.value) || 0)),
+                      }))
+                    }
+                  />
+                </label>
+                <label className="text-sm">
+                  Interval seconds (0 = off, min 30)
+                  <input
+                    type="number"
+                    min={0}
+                    max={3600}
+                    step={30}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+                    value={localSettings.live_cta_interval_sec ?? 0}
+                    onChange={(e) =>
+                      setLocalSettings((s) => ({
+                        ...s,
+                        live_cta_interval_sec: Math.max(
+                          0,
+                          Math.min(3600, Number(e.target.value) || 0),
+                        ),
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+            )}
             {liveSettingsError && (
               <p className="text-sm text-[#d77a6d] sm:col-span-2">{liveSettingsError}</p>
             )}

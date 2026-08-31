@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { getSettingsAction } from "@/app/actions";
+import { GalleryIcon, ShareIcon, WishIcon } from "@/components/GuestNavIcons";
+import { PromoLogo } from "@/components/PromoLogo";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteQr } from "@/components/SiteQr";
+import { SocialLinksRow } from "@/components/SocialLinksRow";
+import { normalizeSocialLinks } from "@/lib/social";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +18,10 @@ export default async function HomePage() {
   const address = settings?.venue_address?.trim();
   const welcome = settings?.welcome_message?.trim();
   const hero = settings?.hero_image_url?.trim();
+  const promoLogo = settings?.promo_logo_url?.trim();
+  const eventSocial = normalizeSocialLinks(settings?.event_social_links);
+  const promoSocial = normalizeSocialLinks(settings?.promo_social_links);
+  const promoHref = promoSocial[0]?.url ?? null;
 
   return (
     <main className="relative min-h-[100dvh] overflow-x-hidden bg-[#0d0f14] text-[#f2f0ea]">
@@ -45,25 +53,31 @@ export default async function HomePage() {
               {welcome && (
                 <p className="mt-6 max-w-xl text-base leading-relaxed text-white/70">{welcome}</p>
               )}
+              {eventSocial.length > 0 && (
+                <SocialLinksRow links={eventSocial} className="mt-6" size="lg" />
+              )}
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link
                   href="/upload"
-                  className="rounded-full bg-[#c4a574] px-6 py-3 text-[#1a140c] transition hover:brightness-110"
+                  className="inline-flex items-center gap-2 rounded-full bg-[#c4a574] px-6 py-3 text-[#1a140c] transition hover:brightness-110"
                 >
+                  <ShareIcon className="h-[1.15rem] w-[1.15rem]" />
                   Share a moment
                 </Link>
                 <a
                   href="/wish"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="rounded-full border border-white/25 px-6 py-3 text-white/90 transition hover:border-white/50"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/25 px-6 py-3 text-white/90 transition hover:border-white/50"
                 >
+                  <WishIcon className="h-[1.15rem] w-[1.15rem]" />
                   Send a wish
                 </a>
                 <Link
                   href="/gallery"
-                  className="rounded-full border border-white/25 px-6 py-3 text-white/90 transition hover:border-white/50"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/25 px-6 py-3 text-white/90 transition hover:border-white/50"
                 >
+                  <GalleryIcon className="h-[1.15rem] w-[1.15rem]" />
                   View gallery
                 </Link>
               </div>
@@ -73,9 +87,22 @@ export default async function HomePage() {
               <SiteQr size={168} label="Scan to open this site" />
             </div>
           </div>
+
+          {(promoLogo || promoSocial.length > 0) && (
+            <footer className="relative z-10 mt-auto flex flex-wrap items-end justify-between gap-4 border-t border-white/10 pt-6">
+              <PromoLogo url={promoLogo} href={promoHref} />
+              {promoSocial.length > 0 && (
+                <SocialLinksRow
+                  links={promoSocial}
+                  label="Follow the studio"
+                  className="ml-auto"
+                  size="sm"
+                />
+              )}
+            </footer>
+          )}
         </div>
       </section>
     </main>
   );
 }
-

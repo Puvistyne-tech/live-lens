@@ -3,6 +3,7 @@
 import { createPresignedUpload } from "@/lib/r2";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { checkPassword, isAdmin, isStaff, setRoleCookie, clearRoleCookies } from "@/lib/auth";
+import { normalizeSocialLinks } from "@/lib/social";
 import type {
   EventSettings,
   GuestUploadMode,
@@ -14,6 +15,12 @@ import type {
 
 const LIVE_DISPLAY_MODES: LiveDisplayMode[] = ["normal", "video", "wish"];
 const DEFAULT_PAGE_SIZE = 24;
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
 
 export type MediaCursor = { created_at: string; id: string };
 
@@ -71,10 +78,19 @@ function normalizeSettings(data: EventSettings): EventSettings {
   return {
     ...data,
     invite_code_prefix: data.invite_code_prefix ?? null,
+    wish_prompt: data.wish_prompt ?? null,
     max_video_seconds: data.max_video_seconds ?? 10,
     live_display_mode: LIVE_DISPLAY_MODES.includes(mode) ? mode : "normal",
     live_sync_enabled: data.live_sync_enabled ?? true,
     live_rotation_epoch: data.live_rotation_epoch ?? new Date().toISOString(),
+    live_cta_enabled: data.live_cta_enabled ?? true,
+    live_cta_on_empty: data.live_cta_on_empty ?? true,
+    live_cta_on_loop: data.live_cta_on_loop ?? true,
+    live_cta_every_n: data.live_cta_every_n ?? 0,
+    live_cta_interval_sec: data.live_cta_interval_sec ?? 0,
+    event_social_links: normalizeSocialLinks(data.event_social_links),
+    promo_social_links: normalizeSocialLinks(data.promo_social_links),
+    promo_logo_url: data.promo_logo_url ?? null,
   };
 }
 
@@ -222,6 +238,11 @@ export async function updateSettingsAction(patch: Partial<EventSettings>) {
     "live_video_sound",
     "live_display_mode",
     "live_sync_enabled",
+    "live_cta_enabled",
+    "live_cta_on_empty",
+    "live_cta_on_loop",
+    "live_cta_every_n",
+    "live_cta_interval_sec",
     "couple_names",
     "event_title",
     "event_date",
@@ -229,11 +250,50 @@ export async function updateSettingsAction(patch: Partial<EventSettings>) {
     "venue_address",
     "hero_image_url",
     "welcome_message",
+    "wish_prompt",
+    "event_social_links",
+    "promo_social_links",
+    "promo_logo_url",
     "invite_code_prefix",
   ];
   const safe: Record<string, unknown> = {};
   for (const key of allowed) {
     if (key in patch) safe[key] = patch[key];
+  }
+
+  if ("wish_prompt" in safe) {
+    const raw = safe.wish_prompt;
+    if (raw == null || raw === "") {
+      safe.wish_prompt = null;
+    } else if (typeof raw === "string") {
+      const trimmed = raw.trim().slice(0, 200);
+      safe.wish_prompt = trimmed || null;
+    } else {
+      throw new Error("Invalid wish prompt");
+    }
+  }
+
+  if ("event_social_links" in safe) {
+    safe.event_social_links = normalizeSocialLinks(safe.event_social_links);
+  }
+  if ("promo_social_links" in safe) {
+    safe.promo_social_links = normalizeSocialLinks(safe.promo_social_links);
+  }
+
+  if ("live_cta_every_n" in safe) {
+    const n = clampInt(safe.live_cta_every_n, 0, 60, 0);
+    safe.live_cta_every_n = n === 1 ? 2 : n;
+  }
+  if ("live_cta_interval_sec" in safe) {
+    const n = clampInt(safe.live_cta_interval_sec, 0, 3600, 0);
+    safe.live_cta_interval_sec = n > 0 && n < 30 ? 30 : n;
+  }
+  for (const key of [
+    "live_cta_enabled",
+    "live_cta_on_empty",
+    "live_cta_on_loop",
+  ] as const) {
+    if (key in safe) safe[key] = Boolean(safe[key]);
   }
 
   if (
