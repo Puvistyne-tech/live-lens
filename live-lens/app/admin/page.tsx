@@ -7,6 +7,8 @@ import { isAdmin } from "@/lib/auth";
 import { AdminClient } from "@/components/AdminClient";
 import type { UploadCode } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminPage() {
   const authed = await isAdmin();
   const settings = await getSettingsAction();
