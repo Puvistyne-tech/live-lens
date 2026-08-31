@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createHmac, timingSafeEqual } from "crypto";
+import { createServerAuthClient } from "@/lib/supabase/server-auth";
 
 const COOKIE_ADMIN = "ll_admin";
 const COOKIE_STAFF = "ll_staff";
@@ -9,14 +10,14 @@ function sign(value: string) {
   return createHmac("sha256", secret).update(value).digest("hex");
 }
 
-function tokenFor(role: "admin" | "staff") {
+function tokenFor(role: "staff") {
   const sig = sign(role);
   return `${role}.${sig}`;
 }
 
-function validToken(token: string | undefined, role: "admin" | "staff") {
+function validStaffToken(token: string | undefined) {
   if (!token) return false;
-  const expected = tokenFor(role);
+  const expected = tokenFor("staff");
   try {
     return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
   } catch {
@@ -24,15 +25,27 @@ function validToken(token: string | undefined, role: "admin" | "staff") {
   }
 }
 
-export async function setRoleCookie(role: "admin" | "staff") {
+export function isAdminUser(user: {
+  app_metadata?: Record<string, unknown> | null;
+} | null | undefined) {
+  return user?.app_metadata?.role === "admin";
+}
+
+export async function setStaffCookie() {
   const jar = await cookies();
-  jar.set(role === "admin" ? COOKIE_ADMIN : COOKIE_STAFF, tokenFor(role), {
+  jar.set(COOKIE_STAFF, tokenFor("staff"), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 12,
   });
+}
+
+/** @deprecated Prefer setStaffCookie — admin uses Supabase Auth. */
+export async function setRoleCookie(role: "admin" | "staff") {
+  if (role === "admin") return;
+  await setStaffCookie();
 }
 
 export async function clearRoleCookies() {
@@ -42,18 +55,23 @@ export async function clearRoleCookies() {
 }
 
 export async function isAdmin() {
-  const jar = await cookies();
-  return validToken(jar.get(COOKIE_ADMIN)?.value, "admin");
+  const supabase = await createServerAuthClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return isAdminUser(user);
 }
 
 export async function isStaff() {
   const jar = await cookies();
-  return validToken(jar.get(COOKIE_STAFF)?.value, "staff") || (await isAdmin());
+  if (validStaffToken(jar.get(COOKIE_STAFF)?.value)) return true;
+  return isAdmin();
 }
 
 export function checkPassword(role: "admin" | "staff", password: string) {
-  const expected =
-    role === "admin" ? process.env.ADMIN_PASSWORD : process.env.STAFF_PASSWORD;
+  // Admin password login removed — use Supabase Auth.
+  if (role === "admin") return false;
+  const expected = process.env.STAFF_PASSWORD;
   if (!expected) return false;
   try {
     return timingSafeEqual(Buffer.from(password), Buffer.from(expected));

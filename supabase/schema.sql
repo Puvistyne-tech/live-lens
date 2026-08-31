@@ -85,6 +85,11 @@ create policy media_select_approved
   to anon, authenticated
   using (approved = true);
 
+create policy media_select_admin
+  on public.media for select
+  to authenticated
+  using (coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin');
+
 create policy event_settings_select
   on public.event_settings for select
   to anon, authenticated

@@ -22,6 +22,7 @@ export default async function HomePage() {
   const eventSocial = normalizeSocialLinks(settings?.event_social_links);
   const promoSocial = normalizeSocialLinks(settings?.promo_social_links);
   const promoHref = promoSocial[0]?.url ?? null;
+  const guestOpen = settings?.guest_upload_enabled ?? false;
 
   return (
     <main className="relative min-h-[100dvh] overflow-x-hidden bg-[#0d0f14] text-[#f2f0ea]">
@@ -57,22 +58,30 @@ export default async function HomePage() {
                 <SocialLinksRow links={eventSocial} className="mt-6" size="lg" />
               )}
               <div className="mt-8 flex flex-wrap gap-3">
-                <Link
-                  href="/upload"
-                  className="inline-flex items-center gap-2 rounded-full bg-[#c4a574] px-6 py-3 text-[#1a140c] transition hover:brightness-110"
-                >
-                  <ShareIcon className="h-[1.15rem] w-[1.15rem]" />
-                  Share a moment
-                </Link>
-                <a
-                  href="/wish"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-full border border-white/25 px-6 py-3 text-white/90 transition hover:border-white/50"
-                >
-                  <WishIcon className="h-[1.15rem] w-[1.15rem]" />
-                  Send a wish
-                </a>
+                {guestOpen ? (
+                  <>
+                    <Link
+                      href="/upload"
+                      className="inline-flex items-center gap-2 rounded-full bg-[#c4a574] px-6 py-3 text-[#1a140c] transition hover:brightness-110"
+                    >
+                      <ShareIcon className="h-[1.15rem] w-[1.15rem]" />
+                      Share a moment
+                    </Link>
+                    <a
+                      href="/wish"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-full border border-white/25 px-6 py-3 text-white/90 transition hover:border-white/50"
+                    >
+                      <WishIcon className="h-[1.15rem] w-[1.15rem]" />
+                      Send a wish
+                    </a>
+                  </>
+                ) : (
+                  <p className="w-full max-w-md rounded-2xl border border-white/15 bg-black/35 px-5 py-4 text-sm leading-relaxed text-white/70 backdrop-blur-sm sm:text-base">
+                    Guest sharing is turned off right now.
+                  </p>
+                )}
                 <Link
                   href="/gallery"
                   className="inline-flex items-center gap-2 rounded-full border border-white/25 px-6 py-3 text-white/90 transition hover:border-white/50"

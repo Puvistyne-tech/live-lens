@@ -32,6 +32,14 @@ _Avoid_: Global social, brand links, studio footer (as the setting name)
 Optional studio/photographer logo image shown bottom-left on home and upload when set.
 _Avoid_: Brand mark, watermark, studio badge (as the setting name)
 
+**Admin**:
+A Supabase Auth user with `app_metadata.role = 'admin'`, who can open `/admin`, moderate media, change event settings, and invite other Admins. Sign-in is email/password or Google OAuth.
+_Avoid_: Staff (cookie password role), moderator (as the product role name), owner
+
+**Staff**:
+An operator who unlocks `/staff` with the shared `STAFF_PASSWORD` cookie session for on-site uploads; not a Supabase Auth Admin.
+_Avoid_: Admin, volunteer account
+
 **Collage**:
 A single still image baked from two to four photos chosen together in one Share.
 _Avoid_: Album, carousel, multi-select set, batch

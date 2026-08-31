@@ -2,7 +2,16 @@
 
 import { createPresignedUpload } from "@/lib/r2";
 import { createServiceSupabase } from "@/lib/supabase/server";
-import { checkPassword, isAdmin, isStaff, setRoleCookie, clearRoleCookies } from "@/lib/auth";
+import { createServerAuthClient } from "@/lib/supabase/server-auth";
+import {
+  checkPassword,
+  clearRoleCookies,
+  isAdmin,
+  isAdminUser,
+  isStaff,
+  setStaffCookie,
+} from "@/lib/auth";
+import { getSiteUrl } from "@/lib/site-url";
 import { normalizeSocialLinks } from "@/lib/social";
 import type {
   EventSettings,
@@ -95,15 +104,85 @@ function normalizeSettings(data: EventSettings): EventSettings {
 }
 
 export async function loginAction(role: "admin" | "staff", password: string) {
-  if (!checkPassword(role, password)) {
+  if (role === "admin") {
+    return { ok: false as const, error: "Use email sign-in for admin" };
+  }
+  if (!checkPassword("staff", password)) {
     return { ok: false as const, error: "Invalid password" };
   }
-  await setRoleCookie(role);
+  await setStaffCookie();
+  return { ok: true as const };
+}
+
+export async function adminLoginAction(email: string, password: string) {
+  const supabase = await createServerAuthClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim(),
+    password,
+  });
+  if (error) {
+    return { ok: false as const, error: error.message };
+  }
+  if (!isAdminUser(data.user)) {
+    await supabase.auth.signOut();
+    return { ok: false as const, error: "Not authorized" };
+  }
   return { ok: true as const };
 }
 
 export async function logoutAction() {
+  try {
+    const supabase = await createServerAuthClient();
+    await supabase.auth.signOut();
+  } catch {
+    // ignore
+  }
   await clearRoleCookies();
+  return { ok: true as const };
+}
+
+export type AdminAccount = {
+  id: string;
+  email: string;
+};
+
+export async function listAdminsAction(): Promise<AdminAccount[]> {
+  if (!(await isAdmin())) throw new Error("Unauthorized");
+  const supabase = createServiceSupabase();
+  const { data, error } = await supabase.auth.admin.listUsers({ perPage: 200 });
+  if (error) throw error;
+  return (data.users || [])
+    .filter((u) => isAdminUser(u))
+    .map((u) => ({
+      id: u.id,
+      email: u.email ?? "",
+    }))
+    .filter((u) => u.email)
+    .sort((a, b) => a.email.localeCompare(b.email));
+}
+
+export async function inviteAdminAction(email: string) {
+  if (!(await isAdmin())) throw new Error("Unauthorized");
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed || !trimmed.includes("@")) throw new Error("Invalid email");
+
+  const site = getSiteUrl();
+  if (!site) throw new Error("NEXT_PUBLIC_SITE_URL is not set");
+
+  const supabase = createServiceSupabase();
+  const { data, error } = await supabase.auth.admin.inviteUserByEmail(trimmed, {
+    redirectTo: `${site}/auth/callback`,
+  });
+  if (error) throw error;
+
+  const userId = data.user?.id;
+  if (userId) {
+    const { error: metaError } = await supabase.auth.admin.updateUserById(userId, {
+      app_metadata: { role: "admin" },
+    });
+    if (metaError) throw metaError;
+  }
+
   return { ok: true as const };
 }
 

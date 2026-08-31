@@ -3,14 +3,26 @@ import {
   listAdminMediaAction,
   listUploadCodesAction,
 } from "@/app/actions";
-import { isAdmin } from "@/lib/auth";
+import { isAdmin, isAdminUser } from "@/lib/auth";
 import { AdminClient } from "@/components/AdminClient";
+import { createServerAuthClient } from "@/lib/supabase/server-auth";
 import type { UploadCode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminPage() {
-  const authed = await isAdmin();
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const params = await searchParams;
+  const supabase = await createServerAuthClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const signedInNonAdmin = Boolean(user && !isAdminUser(user));
+  const authed = !signedInNonAdmin && (await isAdmin());
   const settings = await getSettingsAction();
   if (!settings) {
     return <main className="p-8 text-white">Settings missing.</main>;
@@ -37,6 +49,13 @@ export default async function AdminPage() {
   const initialStatus =
     authed && mediaPage.pendingCount > 0 ? ("pending" as const) : ("live" as const);
 
+  const authError =
+    params.error === "unauthorized" || signedInNonAdmin
+      ? "Not authorized"
+      : params.error === "auth"
+        ? "Sign-in failed"
+        : null;
+
   return (
     <AdminClient
       initiallyAuthed={authed}
@@ -46,6 +65,8 @@ export default async function AdminPage() {
       initialPendingCount={mediaPage.pendingCount}
       initialStatus={initialStatus}
       codes={codes}
+      initialAuthError={authError}
+      rejectSession={!authed && (signedInNonAdmin || params.error === "unauthorized")}
     />
   );
 }

@@ -22,6 +22,7 @@ export default async function UploadPage() {
   const eventSocial = normalizeSocialLinks(settings?.event_social_links);
   const promoSocial = normalizeSocialLinks(settings?.promo_social_links);
   const promoHref = promoSocial[0]?.url ?? null;
+  const guestOpen = settings?.guest_upload_enabled ?? false;
 
   return (
     <main className="min-h-[100dvh] overflow-x-hidden bg-[#0d0f14] text-[#f2f0ea]">
@@ -65,40 +66,48 @@ export default async function UploadPage() {
         <h2 className="font-[family-name:var(--font-display)] text-3xl tracking-tight">
           Share a moment
         </h2>
-        <p className="mt-2 text-white/60">
-          Add a photo from your camera roll, or open the wish camera for a short message to the
-          couple.
-        </p>
 
-        <div className="mt-6">
-          <a
-            href="/wish"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex w-full items-center justify-center gap-2 rounded-full border border-[#c4a574]/60 bg-[#c4a574]/15 px-6 py-3.5 text-[#e8d5b5] transition hover:bg-[#c4a574]/25"
-          >
-            <WishIcon className="h-[1.15rem] w-[1.15rem]" />
-            Open wish camera
-          </a>
-        </div>
-
-        <div className="mt-10 border-t border-white/10 pt-8">
-          <h3 className="text-lg text-white/85">From your gallery</h3>
-          <p className="mt-1 text-sm text-white/50">Photos and short videos from your library.</p>
-          <div className="mt-6">
-            {!settings?.guest_upload_enabled ? (
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white/60">
-                Guest upload is currently off. You can still{" "}
-                <Link href="/gallery" className="text-[#e8d5b5] underline-offset-2 hover:underline">
-                  browse the gallery
-                </Link>
-                .
-              </div>
-            ) : (
-              <MediaUploader settings={settings} role="guest" fileOnly />
-            )}
+        {!guestOpen ? (
+          <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6 text-white/70">
+            <p>Guest sharing is turned off right now.</p>
+            <p className="mt-3 text-sm text-white/50">
+              You can still{" "}
+              <Link href="/gallery" className="text-[#e8d5b5] underline-offset-2 hover:underline">
+                browse the gallery
+              </Link>
+              .
+            </p>
           </div>
-        </div>
+        ) : (
+          <>
+            <p className="mt-2 text-white/60">
+              Add a photo from your camera roll, or open the wish camera for a short message to the
+              couple.
+            </p>
+
+            <div className="mt-6">
+              <a
+                href="/wish"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex w-full items-center justify-center gap-2 rounded-full border border-[#c4a574]/60 bg-[#c4a574]/15 px-6 py-3.5 text-[#e8d5b5] transition hover:bg-[#c4a574]/25"
+              >
+                <WishIcon className="h-[1.15rem] w-[1.15rem]" />
+                Open wish camera
+              </a>
+            </div>
+
+            <div className="mt-10 border-t border-white/10 pt-8">
+              <h3 className="text-lg text-white/85">From your gallery</h3>
+              <p className="mt-1 text-sm text-white/50">Photos and short videos from your library.</p>
+              <div className="mt-6">
+                {settings ? (
+                  <MediaUploader settings={settings} role="guest" fileOnly />
+                ) : null}
+              </div>
+            </div>
+          </>
+        )}
 
         {(promoLogo || promoSocial.length > 0) && (
           <footer className="mt-12 flex flex-wrap items-end justify-between gap-4 border-t border-white/10 pt-6">

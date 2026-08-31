@@ -5,16 +5,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  adminLoginAction,
   createUploadCodeAction,
   deleteMediaAction,
   deleteMediaBulkAction,
   deleteUploadCodeAction,
+  inviteAdminAction,
   listAdminMediaAction,
-  loginAction,
+  listAdminsAction,
   logoutAction,
   setMediaApprovedAction,
   setMediaApprovedBulkAction,
   updateSettingsAction,
+  type AdminAccount,
   type AdminMediaStatus,
   type AdminMediaTagFilter,
   type MediaCursor,
@@ -27,6 +30,8 @@ import {
   defaultSocialPlatform,
   isSocialPlatform,
 } from "@/lib/social";
+import { getSiteUrl } from "@/lib/site-url";
+import { createBrowserAuthClient } from "@/lib/supabase/browser-auth";
 import type {
   EventSettings,
   GuestUploadMode,
@@ -46,6 +51,9 @@ type Props = {
   initialPendingCount: number;
   initialStatus: AdminMediaStatus;
   codes: UploadCode[];
+  initialAuthError?: string | null;
+  /** Clear a leftover non-admin Auth session on the client (Server Components cannot set cookies). */
+  rejectSession?: boolean;
 };
 
 type ChipProps = {
@@ -319,12 +327,16 @@ export function AdminClient({
   initialPendingCount,
   initialStatus,
   codes,
+  initialAuthError = null,
+  rejectSession = false,
 }: Props) {
   const router = useRouter();
   const [authed, setAuthed] = useState(initiallyAuthed);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialAuthError);
   const [loginBusy, setLoginBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [localSettings, setLocalSettings] = useState(settings);
   const [codeDigits, setCodeDigits] = useState("");
   const [hours, setHours] = useState(6);
@@ -339,6 +351,12 @@ export function AdminClient({
   const [savingPrefix, setSavingPrefix] = useState(false);
   const [codeBusy, setCodeBusy] = useState(false);
 
+  const [admins, setAdmins] = useState<AdminAccount[]>([]);
+  const [adminsLoading, setAdminsLoading] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
+
+  const [adminTab, setAdminTab] = useState<"gallery" | "settings">("gallery");
   const [status, setStatus] = useState<AdminMediaStatus>(initialStatus);
   const [mediaType, setMediaType] = useState<MediaType | "all">("all");
   const [tag, setTag] = useState<AdminMediaTagFilter>("all");
@@ -376,9 +394,9 @@ export function AdminClient({
   }
 
   const fetchPage = useCallback(
-    async (opts: { append: boolean; cursor?: MediaCursor | null }) => {
+    async (opts: { append: boolean; cursor?: MediaCursor | null; preserveSelection?: boolean }) => {
       if (opts.append) setLoadingMore(true);
-      else setGalleryLoading(true);
+      else if (!opts.preserveSelection) setGalleryLoading(true);
       try {
         const page = await listAdminMediaAction({
           status,
@@ -391,7 +409,15 @@ export function AdminClient({
         setPendingCount(page.pendingCount);
         setNextCursor(page.nextCursor);
         setMedia((prev) => (opts.append ? [...prev, ...page.items] : page.items));
-        if (!opts.append) setSelected(new Set());
+        if (!opts.append && !opts.preserveSelection) setSelected(new Set());
+        else if (!opts.append && opts.preserveSelection) {
+          setSelected((prev) => {
+            const ids = new Set(page.items.map((m) => m.id));
+            const next = new Set<string>();
+            for (const id of prev) if (ids.has(id)) next.add(id);
+            return next;
+          });
+        }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to load media");
       } finally {
@@ -410,6 +436,76 @@ export function AdminClient({
     }
     void fetchPage({ append: false });
   }, [status, mediaType, tag, source, fetchPage]);
+
+  useEffect(() => {
+    if (!rejectSession) return;
+    void (async () => {
+      try {
+        await logoutAction();
+      } catch {
+        const supabase = createBrowserAuthClient();
+        await supabase.auth.signOut();
+      }
+    })();
+  }, [rejectSession]);
+
+  // Authenticated Realtime: Admin JWT + media_select_admin RLS includes pending rows.
+  useEffect(() => {
+    if (!authed) return;
+
+    const supabase = createBrowserAuthClient();
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefetch = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        void fetchPage({ append: false, preserveSelection: true });
+      }, 350);
+    };
+
+    const channel = supabase
+      .channel("admin-media")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "media" },
+        () => {
+          scheduleRefetch();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "event_settings" },
+        (payload) => {
+          setLocalSettings(payload.new as EventSettings);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      void supabase.removeChannel(channel);
+    };
+  }, [authed, fetchPage]);
+
+  useEffect(() => {
+    if (!authed || adminTab !== "settings") return;
+    let cancelled = false;
+    setAdminsLoading(true);
+    void (async () => {
+      try {
+        const list = await listAdminsAction();
+        if (!cancelled) setAdmins(list);
+      } catch (err) {
+        if (!cancelled) {
+          toast.error(err instanceof Error ? err.message : "Failed to load admins");
+        }
+      } finally {
+        if (!cancelled) setAdminsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authed, adminTab]);
 
   function randomDigits() {
     const used = new Set(codes.map((c) => c.code.toUpperCase()));
@@ -638,7 +734,7 @@ export function AdminClient({
                 setLoginBusy(true);
                 setError(null);
                 try {
-                  const res = await loginAction("admin", password);
+                  const res = await adminLoginAction(email, password);
                   if (!res.ok) {
                     setError(res.error);
                     return;
@@ -652,20 +748,61 @@ export function AdminClient({
             }}
           >
             <input
-              type="password"
+              type="email"
+              autoComplete="username"
               className="w-full rounded-xl border border-white/15 bg-black/30 px-4 py-3"
-              placeholder="Admin password"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              autoComplete="current-password"
+              className="w-full rounded-xl border border-white/15 bg-black/30 px-4 py-3"
+              placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              required
             />
             <button
-              className="rounded-full bg-[#c4a574] px-5 py-3 text-[#1a140c] disabled:opacity-50"
-              disabled={loginBusy}
+              className="w-full rounded-full bg-[#c4a574] px-5 py-3 text-[#1a140c] disabled:opacity-50"
+              disabled={loginBusy || googleBusy}
             >
               {loginBusy ? "Signing in…" : "Sign in"}
             </button>
             {error && <p className="text-sm text-[#d77a6d]">{error}</p>}
           </form>
+          <div className="my-6 flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-white/35">
+            <span className="h-px flex-1 bg-white/10" />
+            or
+            <span className="h-px flex-1 bg-white/10" />
+          </div>
+          <button
+            type="button"
+            className="w-full rounded-full border border-white/20 px-5 py-3 text-sm disabled:opacity-50"
+            disabled={loginBusy || googleBusy}
+            onClick={() => {
+              void (async () => {
+                setGoogleBusy(true);
+                setError(null);
+                try {
+                  const site = getSiteUrl() || window.location.origin;
+                  const supabase = createBrowserAuthClient();
+                  const { error: oauthError } = await supabase.auth.signInWithOAuth({
+                    provider: "google",
+                    options: { redirectTo: `${site}/auth/callback` },
+                  });
+                  if (oauthError) setError(oauthError.message);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Google sign-in failed");
+                  setGoogleBusy(false);
+                }
+              })();
+            }}
+          >
+            {googleBusy ? "Redirecting…" : "Continue with Google"}
+          </button>
         </div>
       </main>
     );
@@ -695,6 +832,44 @@ export function AdminClient({
           </button>
         </header>
 
+        <nav className="flex flex-wrap gap-2 border-b border-white/10 pb-1">
+          <button
+            type="button"
+            className={`rounded-full px-4 py-2 text-sm transition ${
+              adminTab === "gallery"
+                ? "bg-[#c4a574] text-[#1a140c]"
+                : "border border-white/20 text-white/70 hover:border-white/40 hover:text-white"
+            }`}
+            onClick={() => setAdminTab("gallery")}
+          >
+            Gallery
+            {pendingCount > 0 && (
+              <span
+                className={`ml-2 inline-flex min-w-[1.25rem] justify-center rounded-full px-1.5 text-xs ${
+                  adminTab === "gallery"
+                    ? "bg-[#1a140c]/20 text-[#1a140c]"
+                    : "bg-amber-500/25 text-amber-100"
+                }`}
+              >
+                {pendingCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={`rounded-full px-4 py-2 text-sm transition ${
+              adminTab === "settings"
+                ? "bg-[#c4a574] text-[#1a140c]"
+                : "border border-white/20 text-white/70 hover:border-white/40 hover:text-white"
+            }`}
+            onClick={() => setAdminTab("settings")}
+          >
+            Settings
+          </button>
+        </nav>
+
+        {adminTab === "settings" && (
+          <>
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <h2 className="text-xl">Event branding</h2>
           <p className="mt-1 text-sm text-white/50">
@@ -1224,6 +1399,67 @@ export function AdminClient({
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <h2 className="text-xl">Admins</h2>
+          <p className="mt-1 text-sm text-white/50">
+            Invite by email. Invitees set a password via the link, or sign in with Google using the
+            same email after the invite.
+          </p>
+          <form
+            className="mt-4 flex flex-wrap items-end gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void (async () => {
+                setInviteBusy(true);
+                try {
+                  await inviteAdminAction(inviteEmail);
+                  setInviteEmail("");
+                  toast.success("Invite sent");
+                  const list = await listAdminsAction();
+                  setAdmins(list);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Invite failed");
+                } finally {
+                  setInviteBusy(false);
+                }
+              })();
+            }}
+          >
+            <label className="min-w-[14rem] flex-1 text-sm">
+              Email
+              <input
+                type="email"
+                required
+                className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2"
+                placeholder="admin@example.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+              />
+            </label>
+            <button
+              type="submit"
+              className="rounded-full border border-white/20 px-4 py-2 text-sm disabled:opacity-50"
+              disabled={inviteBusy || !inviteEmail.trim()}
+            >
+              {inviteBusy ? "Sending…" : "Send invite"}
+            </button>
+          </form>
+          <ul className="mt-4 space-y-2 text-sm text-white/70">
+            {adminsLoading && <li className="text-white/45">Loading…</li>}
+            {!adminsLoading && admins.length === 0 && (
+              <li className="text-white/45">No admins listed yet.</li>
+            )}
+            {admins.map((a) => (
+              <li key={a.id} className="font-mono text-white">
+                {a.email}
+              </li>
+            ))}
+          </ul>
+        </section>
+          </>
+        )}
+
+        {adminTab === "gallery" && (
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-xl">Gallery</h2>
@@ -1335,9 +1571,10 @@ export function AdminClient({
             </div>
           )}
         </section>
+        )}
       </div>
 
-      {selected.size > 0 && (
+      {adminTab === "gallery" && selected.size > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#12141a]/95 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-white/70">{selected.size} selected</p>

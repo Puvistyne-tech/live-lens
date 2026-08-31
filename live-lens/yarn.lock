@@ -1283,6 +1283,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@supabase/ssr@npm:^0.12.5":
+  version: 0.12.5
+  resolution: "@supabase/ssr@npm:0.12.5"
+  dependencies:
+    cookie: "npm:^1.0.2"
+  peerDependencies:
+    "@supabase/supabase-js": ^2.112.4
+  checksum: 10c0/7e6adbfa93c7207ffedd5ac0f37c99eb21bfd2c7233341c574896412d77db3ad130aaec77d5290f648e9a526f558cb34890366731d4b504b731e5450dbe45d6e
+  languageName: node
+  linkType: hard
+
 "@supabase/storage-js@npm:2.112.4":
   version: 2.112.4
   resolution: "@supabase/storage-js@npm:2.112.4"
@@ -2425,6 +2436,13 @@ __metadata:
   version: 2.0.0
   resolution: "convert-source-map@npm:2.0.0"
   checksum: 10c0/8f2f7a27a1a011cc6cc88cc4da2d7d0cfa5ee0369508baae3d98c260bb3ac520691464e5bbe4ae7cdf09860c1d69ecc6f70c63c6e7c7f7e3f18ec08484dc7d9b
+  languageName: node
+  linkType: hard
+
+"cookie@npm:^1.0.2":
+  version: 1.1.1
+  resolution: "cookie@npm:1.1.1"
+  checksum: 10c0/79c4ddc0fcad9c4f045f826f42edf54bcc921a29586a4558b0898277fa89fb47be95bc384c2253f493af7b29500c830da28341274527328f18eba9f58afa112c
   languageName: node
   linkType: hard
 
@@ -4122,6 +4140,7 @@ __metadata:
     "@aws-sdk/s3-request-presigner": "npm:^3.1113.0"
     "@react-three/drei": "npm:^10.7.8"
     "@react-three/fiber": "npm:^9.7.0"
+    "@supabase/ssr": "npm:^0.12.5"
     "@supabase/supabase-js": "npm:^2.112.3"
     "@tailwindcss/postcss": "npm:^4"
     "@types/node": "npm:^20"

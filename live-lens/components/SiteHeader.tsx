@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { GalleryIcon, LiveIcon, ShareIcon } from "@/components/GuestNavIcons";
+import { GalleryIcon, LiveIcon, PersonIcon, ShareIcon } from "@/components/GuestNavIcons";
 
 type Props = {
   /** Extra classes on the outer nav row */
@@ -35,6 +35,13 @@ export function SiteHeader({
           <Link href="/live" className="inline-flex items-center gap-1.5 hover:text-white">
             <LiveIcon className="h-4 w-4" />
             Live
+          </Link>
+          <Link
+            href="/admin"
+            className="inline-flex items-center hover:text-white"
+            aria-label="Admin sign in"
+          >
+            <PersonIcon className="h-4 w-4" />
           </Link>
         </div>
       )}
