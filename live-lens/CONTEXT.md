@@ -20,9 +20,13 @@ _Avoid_: Album, carousel, multi-select set, batch
 Optional text attached to a Share or Wish and stored as the media caption; shown as a UI overlay on top of the media.
 _Avoid_: Caption (implementation field name), comment, note
 
-**Live video sound**:
-Whether the live wall prefers videos to start with audio on; the wall also exposes an unmute control.
-_Avoid_: Unmute default, audio enabled, sound on
+**Live mode**:
+Which approved media the live wall shows: all media (Normal), videos only (Video), or Wishes only (Wish). Mute default follows the mode (Video starts unmuted; Normal and Wish start muted).
+_Avoid_: Live display mode, guest live, live filter
+
+**Live sync**:
+Whether every open live wall shows the same slide at the same time via a shared rotation clock; when off, each device advances on its own timer.
+_Avoid_: Slide sync, multi-device sync, live mirror
 
 **Data saver**:
 A gallery preference that favors smaller image variants; also turns on automatically on slow networks.

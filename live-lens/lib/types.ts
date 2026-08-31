@@ -2,6 +2,7 @@ export type MediaType = "photo" | "video";
 export type MediaSource = "pro_camera" | "staff" | "guest";
 export type GuestUploadMode = "open" | "moderated" | "invite_code";
 export type MediaTag = "dancing" | "portrait" | "group" | "food" | "other" | "wish";
+export type LiveDisplayMode = "normal" | "video" | "wish";
 
 export type MediaRow = {
   id: string;
@@ -30,6 +31,9 @@ export type EventSettings = {
   max_video_seconds: number;
   live_include_guest_video: boolean;
   live_video_sound: boolean;
+  live_display_mode: LiveDisplayMode;
+  live_sync_enabled: boolean;
+  live_rotation_epoch: string;
   couple_names: string | null;
   event_title: string | null;
   event_date: string | null;

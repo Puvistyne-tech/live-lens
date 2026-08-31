@@ -15,6 +15,7 @@
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
     "@supabase/supabase-js": "^2.112.3",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "@vladmandic/face-api": "^1.7.15",
     "framer-motion": "^13.1.0",
@@ -23,6 +24,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sharp": "^0.35.3",
+    "sonner": "^2.0.8",
     "three": "^0.185.1",
     "yet-another-react-lightbox": "^3.32.2"
   },

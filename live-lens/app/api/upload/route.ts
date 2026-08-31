@@ -149,6 +149,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    if (approved) {
+      const now = new Date().toISOString();
+      await supabase
+        .from("event_settings")
+        .update({ live_rotation_epoch: now, updated_at: now })
+        .eq("id", "default");
+    }
+
     return NextResponse.json({ ok: true, media: data });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Upload failed";

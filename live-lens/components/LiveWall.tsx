@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { SiteQr } from "@/components/SiteQr";
 import { preloadLiveMedia } from "@/lib/media-preload";
 import { createBrowserSupabase } from "@/lib/supabase/client";
-import type { EventSettings, MediaRow } from "@/lib/types";
+import type { EventSettings, LiveDisplayMode, MediaRow } from "@/lib/types";
 
 const DepthParallax = dynamic(
   () => import("@/components/DepthParallax").then((m) => m.DepthParallax),
@@ -15,6 +15,7 @@ const DepthParallax = dynamic(
 );
 
 const HOLD_MS = 7000;
+const SYNC_TICK_MS = 250;
 const KEN_BURNS_MS = 6500;
 const SWAP_EASE = [0.22, 1, 0.36, 1] as const;
 const KEN_BURNS_SCALE = 1.08;
@@ -24,6 +25,35 @@ type Props = {
   initialItems: MediaRow[];
   settings: EventSettings | null;
 };
+
+function mutedByMode(mode: LiveDisplayMode | undefined) {
+  return mode !== "video";
+}
+
+function syncedIndex(epochIso: string | undefined, length: number): number {
+  if (length <= 0) return 0;
+  const epochMs = epochIso ? Date.parse(epochIso) : Date.now();
+  const origin = Number.isFinite(epochMs) ? epochMs : Date.now();
+  const elapsed = Math.max(0, Date.now() - origin);
+  return Math.floor(elapsed / HOLD_MS) % length;
+}
+
+function filterLiveItems(items: MediaRow[], liveSettings: EventSettings | null): MediaRow[] {
+  const mode = liveSettings?.live_display_mode ?? "normal";
+  return items.filter((item) => {
+    if (mode === "video") return item.media_type === "video";
+    if (mode === "wish") return item.tag?.toLowerCase() === "wish";
+    if (
+      item.media_type === "video" &&
+      liveSettings &&
+      !liveSettings.live_include_guest_video &&
+      item.source === "guest"
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
 
 function objectPosition(item: MediaRow) {
   const x = item.focal_x != null ? Math.round(item.focal_x * 100) : 50;
@@ -79,26 +109,18 @@ export function LiveWall({ initialItems, settings }: Props) {
   const [items, setItems] = useState(initialItems);
   const [index, setIndex] = useState(0);
   const [liveSettings, setLiveSettings] = useState(settings);
-  const [muted, setMuted] = useState(!(settings?.live_video_sound ?? false));
+  const [muted, setMuted] = useState(mutedByMode(settings?.live_display_mode));
   const reducedMotion = useReducedMotion() ?? false;
 
-  const visible = useMemo(() => {
-    return items.filter((item) => {
-      if (
-        item.media_type === "video" &&
-        liveSettings &&
-        !liveSettings.live_include_guest_video &&
-        item.source === "guest"
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [items, liveSettings]);
+  const syncEnabled = liveSettings?.live_sync_enabled ?? true;
 
+  const visible = useMemo(
+    () => filterLiveItems(items, liveSettings),
+    [items, liveSettings],
+  );
 
-  const current = visible[index % Math.max(visible.length, 1)];
-  
+  const current = visible.length ? visible[index % visible.length] : undefined;
+
   const couple = liveSettings?.couple_names?.trim();
   const isWish = current?.tag?.toLowerCase() === "wish";
   const uploaderLabel = (() => {
@@ -139,7 +161,7 @@ export function LiveWall({ initialItems, settings }: Props) {
         (payload) => {
           const row = payload.new as EventSettings;
           setLiveSettings(row);
-          setMuted(!(row.live_video_sound ?? false));
+          setMuted(mutedByMode(row.live_display_mode));
         },
       )
       .subscribe();
@@ -149,10 +171,19 @@ export function LiveWall({ initialItems, settings }: Props) {
   }, []);
 
   useEffect(() => {
+    if (!visible.length) return;
+    if (syncEnabled) {
+      const tick = () => {
+        setIndex(syncedIndex(liveSettings?.live_rotation_epoch, visible.length));
+      };
+      tick();
+      const id = setInterval(tick, SYNC_TICK_MS);
+      return () => clearInterval(id);
+    }
     if (visible.length <= 1) return;
     const id = setInterval(() => setIndex((i) => i + 1), HOLD_MS);
     return () => clearInterval(id);
-  }, [visible.length]);
+  }, [visible.length, syncEnabled, liveSettings?.live_rotation_epoch]);
 
   useEffect(() => {
     if (!visible.length) return;
@@ -224,7 +255,7 @@ export function LiveWall({ initialItems, settings }: Props) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
           >
-            Waiting for the first photo…
+            Waiting for media…
           </motion.p>
         )}
       </AnimatePresence>

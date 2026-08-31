@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { listApprovedMediaAction, type MediaCursor } from "@/app/actions";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 import type { MediaRow } from "@/lib/types";
 import { ProgressiveImage } from "@/components/ProgressiveImage";
@@ -36,11 +37,14 @@ function objectPosition(item: MediaRow) {
 
 type Props = {
   initialItems: MediaRow[];
+  initialNextCursor: MediaCursor | null;
 };
 
-export function GalleryClient({ initialItems }: Props) {
+export function GalleryClient({ initialItems, initialNextCursor }: Props) {
   const searchParams = useSearchParams();
   const [items, setItems] = useState(initialItems);
+  const [nextCursor, setNextCursor] = useState<MediaCursor | null>(initialNextCursor);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [album, setAlbum] = useState<AlbumKey>("all");
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const { cols, setColumns, levels, containerRef } = useGridDensity({
@@ -49,6 +53,21 @@ export function GalleryClient({ initialItems }: Props) {
   });
   const { preferLowQuality, dataSaver, setDataSaver } = useNetworkQuality();
   const [viewOptionsOpen, setViewOptionsOpen] = useState(false);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await listApprovedMediaAction({ cursor: nextCursor, limit: 24 });
+      setItems((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...page.items.filter((i) => !seen.has(i.id))];
+      });
+      setNextCursor(page.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     const supabase = createBrowserSupabase();
@@ -288,6 +307,19 @@ export function GalleryClient({ initialItems }: Props) {
             </div>
           )}
         </>
+      )}
+
+      {nextCursor && (
+        <div className="mt-8 flex justify-center">
+          <button
+            type="button"
+            className="rounded-full border border-white/20 px-5 py-2 text-sm text-white/80 transition hover:border-white/40 disabled:opacity-50"
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        </div>
       )}
 
       <GalleryLightbox

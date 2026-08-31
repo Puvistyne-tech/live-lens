@@ -3,7 +3,80 @@
 import { createPresignedUpload } from "@/lib/r2";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { checkPassword, isAdmin, isStaff, setRoleCookie, clearRoleCookies } from "@/lib/auth";
-import type { EventSettings, GuestUploadMode, MediaRow } from "@/lib/types";
+import type {
+  EventSettings,
+  GuestUploadMode,
+  LiveDisplayMode,
+  MediaRow,
+  MediaSource,
+  MediaType,
+} from "@/lib/types";
+
+const LIVE_DISPLAY_MODES: LiveDisplayMode[] = ["normal", "video", "wish"];
+const DEFAULT_PAGE_SIZE = 24;
+
+export type MediaCursor = { created_at: string; id: string };
+
+export type AdminMediaStatus = "pending" | "live" | "all";
+export type AdminMediaTagFilter = "wish" | "other" | "all";
+
+export type ListAdminMediaInput = {
+  status?: AdminMediaStatus;
+  mediaType?: MediaType | "all";
+  tag?: AdminMediaTagFilter;
+  source?: MediaSource | "all";
+  cursor?: MediaCursor | null;
+  limit?: number;
+};
+
+export type ListMediaPage = {
+  items: MediaRow[];
+  nextCursor: MediaCursor | null;
+};
+
+function applyMediaCursor<T extends { or: (filter: string) => T }>(
+  query: T,
+  cursor: MediaCursor | null | undefined,
+): T {
+  if (!cursor) return query;
+  const ts = cursor.created_at.replace(/"/g, "");
+  const id = cursor.id.replace(/"/g, "");
+  return query.or(
+    `created_at.lt."${ts}",and(created_at.eq."${ts}",id.lt."${id}")`,
+  );
+}
+
+function pageFromRows(rows: MediaRow[], limit: number): ListMediaPage {
+  const hasMore = rows.length > limit;
+  const items = hasMore ? rows.slice(0, limit) : rows;
+  const last = items[items.length - 1];
+  return {
+    items,
+    nextCursor: hasMore && last ? { created_at: last.created_at, id: last.id } : null,
+  };
+}
+
+async function bumpLiveRotationEpoch(
+  supabase: ReturnType<typeof createServiceSupabase>,
+) {
+  const now = new Date().toISOString();
+  await supabase
+    .from("event_settings")
+    .update({ live_rotation_epoch: now, updated_at: now })
+    .eq("id", "default");
+}
+
+function normalizeSettings(data: EventSettings): EventSettings {
+  const mode = data.live_display_mode;
+  return {
+    ...data,
+    invite_code_prefix: data.invite_code_prefix ?? null,
+    max_video_seconds: data.max_video_seconds ?? 10,
+    live_display_mode: LIVE_DISPLAY_MODES.includes(mode) ? mode : "normal",
+    live_sync_enabled: data.live_sync_enabled ?? true,
+    live_rotation_epoch: data.live_rotation_epoch ?? new Date().toISOString(),
+  };
+}
 
 export async function loginAction(role: "admin" | "staff", password: string) {
   if (!checkPassword(role, password)) {
@@ -22,30 +95,80 @@ export async function getSettingsAction(): Promise<EventSettings | null> {
   const supabase = createServiceSupabase();
   const { data } = await supabase.from("event_settings").select("*").eq("id", "default").maybeSingle();
   if (!data) return null;
-  const row = data as EventSettings & { invite_code_prefix?: string | null };
-  return {
-    ...row,
-    invite_code_prefix: row.invite_code_prefix ?? null,
-    max_video_seconds: row.max_video_seconds ?? 10,
-  };
+  return normalizeSettings(data as EventSettings);
 }
 
+/** Fixed-size fetch for live wall (no cursor). */
 export async function getApprovedMediaAction(limit = 40): Promise<MediaRow[]> {
+  const page = await listApprovedMediaAction({ limit, cursor: null });
+  return page.items;
+}
+
+export async function listApprovedMediaAction(opts?: {
+  cursor?: MediaCursor | null;
+  limit?: number;
+}): Promise<ListMediaPage> {
+  const limit = opts?.limit ?? DEFAULT_PAGE_SIZE;
   const supabase = createServiceSupabase();
-  const { data } = await supabase
+  let query = supabase
     .from("media")
     .select("*")
     .eq("approved", true)
     .order("created_at", { ascending: false })
-    .limit(limit);
-  return (data || []) as MediaRow[];
+    .order("id", { ascending: false })
+    .limit(limit + 1);
+  query = applyMediaCursor(query, opts?.cursor);
+  const { data, error } = await query;
+  if (error) throw error;
+  return pageFromRows((data || []) as MediaRow[], limit);
 }
 
-export async function getAllMediaAction(): Promise<MediaRow[]> {
+export async function listAdminMediaAction(
+  input: ListAdminMediaInput = {},
+): Promise<ListMediaPage & { pendingCount: number }> {
   if (!(await isAdmin())) throw new Error("Unauthorized");
   const supabase = createServiceSupabase();
-  const { data } = await supabase.from("media").select("*").order("created_at", { ascending: false }).limit(200);
-  return (data || []) as MediaRow[];
+  const limit = input.limit ?? DEFAULT_PAGE_SIZE;
+  const status = input.status ?? "all";
+  const mediaType = input.mediaType ?? "all";
+  const tag = input.tag ?? "all";
+  const source = input.source ?? "all";
+
+  const { count: pendingCount } = await supabase
+    .from("media")
+    .select("*", { count: "exact", head: true })
+    .eq("approved", false);
+
+  let query = supabase
+    .from("media")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit + 1);
+
+  if (status === "pending") query = query.eq("approved", false);
+  else if (status === "live") query = query.eq("approved", true);
+
+  if (mediaType === "photo" || mediaType === "video") {
+    query = query.eq("media_type", mediaType);
+  }
+
+  if (source !== "all") {
+    query = query.eq("source", source);
+  }
+
+  if (tag === "wish") {
+    query = query.ilike("tag", "wish");
+  } else if (tag === "other") {
+    query = query.or("tag.is.null,tag.not.ilike.wish");
+  }
+
+  query = applyMediaCursor(query, input.cursor);
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const page = pageFromRows((data || []) as MediaRow[], limit);
+  return { ...page, pendingCount: pendingCount ?? 0 };
 }
 
 export async function setMediaApprovedAction(id: string, approved: boolean) {
@@ -53,7 +176,18 @@ export async function setMediaApprovedAction(id: string, approved: boolean) {
   const supabase = createServiceSupabase();
   const { error } = await supabase.from("media").update({ approved }).eq("id", id);
   if (error) throw error;
+  if (approved) await bumpLiveRotationEpoch(supabase);
   return { ok: true };
+}
+
+export async function setMediaApprovedBulkAction(ids: string[], approved: boolean) {
+  if (!(await isAdmin())) throw new Error("Unauthorized");
+  if (ids.length === 0) return { ok: true as const };
+  const supabase = createServiceSupabase();
+  const { error } = await supabase.from("media").update({ approved }).in("id", ids);
+  if (error) throw error;
+  if (approved) await bumpLiveRotationEpoch(supabase);
+  return { ok: true as const };
 }
 
 export async function deleteMediaAction(id: string) {
@@ -64,9 +198,20 @@ export async function deleteMediaAction(id: string) {
   return { ok: true };
 }
 
+export async function deleteMediaBulkAction(ids: string[]) {
+  if (!(await isAdmin())) throw new Error("Unauthorized");
+  if (ids.length === 0) return { ok: true as const };
+  const supabase = createServiceSupabase();
+  const { error } = await supabase.from("media").delete().in("id", ids);
+  if (error) throw error;
+  return { ok: true as const };
+}
+
 export async function updateSettingsAction(patch: Partial<EventSettings>) {
   if (!(await isAdmin())) throw new Error("Unauthorized");
   const supabase = createServiceSupabase();
+  const current = await getSettingsAction();
+
   const allowed: (keyof EventSettings)[] = [
     "guest_upload_enabled",
     "guest_upload_mode",
@@ -75,6 +220,8 @@ export async function updateSettingsAction(patch: Partial<EventSettings>) {
     "max_video_seconds",
     "live_include_guest_video",
     "live_video_sound",
+    "live_display_mode",
+    "live_sync_enabled",
     "couple_names",
     "event_title",
     "event_date",
@@ -88,9 +235,28 @@ export async function updateSettingsAction(patch: Partial<EventSettings>) {
   for (const key of allowed) {
     if (key in patch) safe[key] = patch[key];
   }
+
+  if (
+    typeof safe.live_display_mode === "string" &&
+    !LIVE_DISPLAY_MODES.includes(safe.live_display_mode as LiveDisplayMode)
+  ) {
+    throw new Error("Invalid live display mode");
+  }
+
+  const modeChanging =
+    safe.live_display_mode != null &&
+    safe.live_display_mode !== current?.live_display_mode;
+  const syncTurningOn =
+    safe.live_sync_enabled === true && current?.live_sync_enabled === false;
+
+  const now = new Date().toISOString();
+  if (modeChanging || syncTurningOn) {
+    safe.live_rotation_epoch = now;
+  }
+
   const { error } = await supabase
     .from("event_settings")
-    .update({ ...safe, updated_at: new Date().toISOString() })
+    .update({ ...safe, updated_at: now })
     .eq("id", "default");
   if (error) throw error;
   return { ok: true };
@@ -230,5 +396,6 @@ export async function finalizeUploadAction(input: {
     .select("*")
     .single();
   if (error) throw error;
+  if (approved) await bumpLiveRotationEpoch(supabase);
   return data as MediaRow;
 }

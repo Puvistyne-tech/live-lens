@@ -37,6 +37,10 @@ create table public.event_settings (
   max_video_seconds integer not null default 10,
   live_include_guest_video boolean not null default true,
   live_video_sound boolean not null default false,
+  live_display_mode text not null default 'normal'
+    check (live_display_mode in ('normal', 'video', 'wish')),
+  live_sync_enabled boolean not null default true,
+  live_rotation_epoch timestamptz not null default now(),
   couple_names text,
   event_title text,
   event_date text,

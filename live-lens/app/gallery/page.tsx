@@ -1,12 +1,12 @@
 import { Suspense } from "react";
-import { getApprovedMediaAction } from "@/app/actions";
+import { listApprovedMediaAction } from "@/app/actions";
 import { GalleryClient } from "@/components/GalleryClient";
 import { SiteHeader } from "@/components/SiteHeader";
 
 export const dynamic = "force-dynamic";
 
 export default async function GalleryPage() {
-  const media = await getApprovedMediaAction(200);
+  const page = await listApprovedMediaAction({ limit: 24 });
 
   return (
     <main className="min-h-[100dvh] bg-[#0d0f14] text-[#f2f0ea]">
@@ -19,7 +19,7 @@ export default async function GalleryPage() {
         </div>
       </header>
       <Suspense fallback={<p className="py-20 text-center text-white/45">Loading gallery…</p>}>
-        <GalleryClient initialItems={media} />
+        <GalleryClient initialItems={page.items} initialNextCursor={page.nextCursor} />
       </Suspense>
     </main>
   );
