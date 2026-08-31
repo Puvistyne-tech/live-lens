@@ -410,7 +410,17 @@ export function AdminClient({ initiallyAuthed, settings, media, codes }: Props) 
                   setLocalSettings((s) => ({ ...s, live_include_guest_video: e.target.checked }))
                 }
               />
-              Mix guest videos into /live (wishes never appear on live)
+              Mix guest videos into /live (wish photos & messages appear on live)
+            </label>
+            <label className="flex items-center gap-3 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={localSettings.live_video_sound ?? false}
+                onChange={(e) =>
+                  setLocalSettings((s) => ({ ...s, live_video_sound: e.target.checked }))
+                }
+              />
+              Start /live videos with sound on (wall still has unmute/mute)
             </label>
           </div>
           <button

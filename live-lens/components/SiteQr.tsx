@@ -54,8 +54,8 @@ export function SiteQr({ size = 160, className = "", label }: Props) {
       setHint("Link copied");
       window.setTimeout(() => setHint(null), 2200);
     } else if (result === "failed") {
-      setHint("Could not share — copy the link from the address bar");
-      window.setTimeout(() => setHint(null), 3200);
+      setHint(siteUrl);
+      window.setTimeout(() => setHint(null), 5000);
     }
   }
 
@@ -77,8 +77,8 @@ export function SiteQr({ size = 160, className = "", label }: Props) {
         onClick={onShare}
         disabled={!dataUrl}
         className="group relative rounded-xl bg-[#f2f0ea] p-2 shadow-lg transition hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c4a574] disabled:opacity-60"
-        aria-label="Share site link and QR code"
-        title="Tap to share link & QR"
+        aria-label="Copy site link"
+        title="Tap to copy site link"
       >
         {dataUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -93,7 +93,7 @@ export function SiteQr({ size = 160, className = "", label }: Props) {
           <div className="animate-pulse rounded-lg bg-black/10" style={{ width: size, height: size }} />
         )}
         <span className="pointer-events-none absolute inset-x-2 bottom-2 rounded-md bg-black/70 px-2 py-1 text-center text-[10px] text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
-          Share link & QR
+          Copy link
         </span>
       </button>
       {label && <figcaption className="text-xs text-white/60">{label}</figcaption>}

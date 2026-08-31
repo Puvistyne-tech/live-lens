@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
-import { Suspense, useMemo, useRef } from "react";
+import { Component, Suspense, type ReactNode, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 THREE.Cache.enabled = true;
@@ -37,7 +37,13 @@ function ParallaxPlane({
   depthUrl: string;
 }) {
   const mesh = useRef<THREE.Mesh>(null);
-  const [colorMap, depthMap] = useLoader(THREE.TextureLoader, [imageUrl, depthUrl]);
+  const [colorMap, depthMap] = useLoader(
+    THREE.TextureLoader,
+    [imageUrl, depthUrl],
+    (loader) => {
+      loader.setCrossOrigin("anonymous");
+    },
+  );
 
   colorMap.colorSpace = THREE.SRGBColorSpace;
   depthMap.colorSpace = THREE.NoColorSpace;
@@ -76,23 +82,97 @@ function ParallaxPlane({
   );
 }
 
+/** Must sit *inside* Canvas — R3F uses its own root, so outer boundaries miss useLoader errors. */
+class CanvasTextureErrorBoundary extends Component<
+  { onError: () => void; children: ReactNode; resetKey: string },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError();
+  }
+
+  componentDidUpdate(prev: { resetKey: string }) {
+    if (prev.resetKey !== this.props.resetKey && this.state.failed) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (this.state.failed) return null;
+    return this.props.children;
+  }
+}
+
 type Props = {
   imageUrl: string;
   depthMapUrl: string;
   className?: string;
 };
 
+function FlatFallback({
+  imageUrl,
+  className,
+  objectPosition,
+}: {
+  imageUrl: string;
+  className: string;
+  objectPosition?: string;
+}) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={imageUrl}
+      alt=""
+      className={`h-full w-full object-contain ${className}`}
+      style={objectPosition ? { objectPosition } : undefined}
+    />
+  );
+}
+
 export function DepthParallax({ imageUrl, depthMapUrl, className = "" }: Props) {
+  const resetKey = `${imageUrl}|${depthMapUrl}`;
+  return (
+    <DepthParallaxInner
+      key={resetKey}
+      imageUrl={imageUrl}
+      depthMapUrl={depthMapUrl}
+      className={className}
+    />
+  );
+}
+
+function DepthParallaxInner({ imageUrl, depthMapUrl, className = "" }: Props) {
+  const resetKey = `${imageUrl}|${depthMapUrl}`;
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return <FlatFallback imageUrl={imageUrl} className={className} />;
+  }
+
   return (
     <div className={`h-full w-full ${className}`}>
       <Canvas
         camera={{ position: [0, 0, 6.5], fov: 42, near: 0.1, far: 100 }}
         dpr={[1, 1.75]}
         gl={{ antialias: true, alpha: true }}
+        onCreated={({ gl }) => {
+          gl.domElement.addEventListener("webglcontextlost", (e) => {
+            e.preventDefault();
+            setFailed(true);
+          });
+        }}
       >
-        <Suspense fallback={null}>
-          <ParallaxPlane key={`${imageUrl}|${depthMapUrl}`} imageUrl={imageUrl} depthUrl={depthMapUrl} />
-        </Suspense>
+        <CanvasTextureErrorBoundary resetKey={resetKey} onError={() => setFailed(true)}>
+          <Suspense fallback={null}>
+            <ParallaxPlane key={resetKey} imageUrl={imageUrl} depthUrl={depthMapUrl} />
+          </Suspense>
+        </CanvasTextureErrorBoundary>
       </Canvas>
     </div>
   );

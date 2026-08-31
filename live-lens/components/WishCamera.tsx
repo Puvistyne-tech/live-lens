@@ -3,10 +3,17 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { validateInviteCodeAction } from "@/app/actions";
-import { compressImageFile } from "@/lib/media-preprocess";
+import { VideoTrimSheet } from "@/components/VideoTrimSheet";
+import {
+  compressImageFile,
+  compressVideoFile,
+  getVideoDurationMs,
+  isLikelyVideo,
+  isVideoTooLong,
+} from "@/lib/media-preprocess";
 import type { EventSettings, MediaRow } from "@/lib/types";
 
-type Phase = "camera" | "review" | "done";
+type Phase = "camera" | "review" | "done" | "trim";
 type Facing = "user" | "environment";
 
 type Props = {
@@ -15,6 +22,7 @@ type Props = {
 
 const LONG_PRESS_MS = 320;
 const MESSAGE_MAX = 120;
+const GALLERY_ACCEPT = "image/*,video/mp4,video/quicktime,video/webm";
 
 function pickMimeType() {
   if (typeof MediaRecorder === "undefined") return "";
@@ -53,6 +61,15 @@ export function WishCamera({ settings }: Props) {
   const [inviteCode, setInviteCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [reviewMuted, setReviewMuted] = useState(false);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [showDevicePicker, setShowDevicePicker] = useState(false);
+  const [trimSource, setTrimSource] = useState<File | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const startGenRef = useRef(0);
 
   const needsCode = settings.guest_upload_mode === "invite_code";
   const maxSeconds = Math.max(1, settings.max_video_seconds || 10);
@@ -63,38 +80,144 @@ export function WishCamera({ settings }: Props) {
     streamRef.current = null;
   }, []);
 
+  const attachStream = useCallback(async (stream: MediaStream) => {
+    streamRef.current = stream;
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = stream;
+      await video.play().catch(() => undefined);
+    }
+  }, []);
+
   const startCamera = useCallback(
     async (face: Facing) => {
-      setCameraError(null);
+      const gen = ++startGenRef.current;
+      setStatus(null);
+      setCameraBusy(true);
+      setCameraReady(false);
       stopStream();
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: {
-            facingMode: { ideal: face },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => undefined);
+        if (typeof window !== "undefined" && !window.isSecureContext) {
+          throw Object.assign(new Error("insecure"), { name: "SecurityError" });
         }
-      } catch {
-        setCameraError("Camera access is required to send a wish. Allow permission and retry.");
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw Object.assign(new Error("unsupported"), { name: "NotSupportedError" });
+        }
+
+        // Video only; mic is added when recording. Must be called from a user tap.
+        const attempts: MediaStreamConstraints[] = [
+          { audio: false, video: { facingMode: { ideal: face } } },
+          { audio: false, video: true },
+        ];
+
+        let stream: MediaStream | null = null;
+        let lastErr: unknown;
+        for (const constraints of attempts) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            break;
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+        if (!stream) throw lastErr ?? new Error("Camera failed");
+
+        if (gen !== startGenRef.current) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        await attachStream(stream);
+        setCameraError(null);
+        setCameraReady(true);
+      } catch (err) {
+        if (gen !== startGenRef.current) return;
+        setCameraReady(false);
+        const name = err instanceof DOMException || err instanceof Error ? err.name : "";
+        if (name === "SecurityError") {
+          setCameraError(
+            "Camera needs HTTPS (or localhost). Use “Device camera / video”, or open this site over HTTPS.",
+          );
+        } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+          setCameraError("No camera found on this device. Use “Device camera / video”.");
+        } else if (name === "NotReadableError" || name === "TrackStartError") {
+          setCameraError(
+            "Camera is in use by another app. Close it, then tap Enable camera — or use “Device camera / video”.",
+          );
+        } else if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          setCameraError(
+            "Camera permission was denied. Check the lock icon in the address bar → Site settings → Camera → Allow, then tap Enable camera.",
+          );
+        } else if (name === "NotSupportedError") {
+          setCameraError("This browser can’t open the in-page camera. Use “Device camera / video”.");
+        } else {
+          setCameraError(
+            "Could not start the camera. Tap Enable camera to try again, or use “Device camera / video”.",
+          );
+        }
+      } finally {
+        if (gen === startGenRef.current) setCameraBusy(false);
       }
     },
-    [stopStream],
+    [attachStream, stopStream],
   );
 
+  async function finishVideoReady(ready: File, durationMs: number) {
+    recordedDurationMsRef.current = durationMs;
+    setTrimSource(null);
+    setStatus(null);
+    goToReview(ready, "video");
+  }
+
+  async function onDeviceCapture(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setStatus(null);
+    try {
+      if (isLikelyVideo(file)) {
+        const durationMs = await getVideoDurationMs(file);
+        if (isVideoTooLong(durationMs, settings.max_video_seconds)) {
+          stopStream();
+          setCameraReady(false);
+          setTrimSource(file);
+          setPhase("trim");
+          return;
+        }
+        if (file.size > settings.max_video_bytes) {
+          setStatus("Compressing video…");
+        }
+        const { file: ready, durationMs: readyMs } = await compressVideoFile(file, {
+          maxBytes: settings.max_video_bytes,
+          maxSeconds: settings.max_video_seconds,
+        });
+        await finishVideoReady(ready, readyMs);
+      } else {
+        const compressed = await compressImageFile(file, {
+          maxBytes: Math.min(1_200_000, settings.max_photo_bytes),
+        });
+        goToReview(compressed, "photo");
+      }
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Could not use that media");
+    }
+  }
+
+  function openDeviceOption(kind: "photo" | "video" | "gallery") {
+    // Click the input in the same tap handler so mobile browsers keep the user gesture.
+    if (kind === "photo") photoInputRef.current?.click();
+    else if (kind === "video") videoInputRef.current?.click();
+    else galleryInputRef.current?.click();
+    setShowDevicePicker(false);
+  }
+
+  // Do not auto-call getUserMedia — browsers require a user gesture.
   useEffect(() => {
-    if (phase !== "camera") return;
-    // Camera stream is an external system; startCamera updates error/UI state after getUserMedia.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional camera lifecycle
-    void startCamera(facing);
-    return () => stopStream();
-  }, [phase, facing, startCamera, stopStream]);
+    return () => {
+      startGenRef.current += 1;
+      stopStream();
+    };
+  }, [stopStream]);
 
   useEffect(() => {
     return () => {
@@ -125,6 +248,7 @@ export function WishCamera({ settings }: Props) {
     setRecording(false);
     setRecordProgress(0);
     recordingRef.current = false;
+    setCameraReady(false);
     stopStream();
   }
 
@@ -147,9 +271,24 @@ export function WishCamera({ settings }: Props) {
     if (photoBlob) goToReview(photoBlob, "photo");
   }
 
-  function startRecording() {
-    const stream = streamRef.current;
+  async function startRecording() {
+    let stream = streamRef.current;
     if (!stream || typeof MediaRecorder === "undefined") return;
+
+    // Optional mic for wish videos — ignore if denied so recording still works.
+    if (!stream.getAudioTracks().length) {
+      try {
+        const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        for (const track of audioOnly.getAudioTracks()) {
+          stream.addTrack(track);
+        }
+      } catch {
+        /* video-only recording */
+      }
+    }
+    stream = streamRef.current;
+    if (!stream) return;
+
     const mime = pickMimeType();
     chunksRef.current = [];
     try {
@@ -205,12 +344,12 @@ export function WishCamera({ settings }: Props) {
   }
 
   function onPointerDown() {
-    if (busy || phase !== "camera" || cameraError) return;
+    if (busy || phase !== "camera" || !cameraReady) return;
     setPressing(true);
     clearPressTimer();
     pressTimerRef.current = setTimeout(() => {
       pressTimerRef.current = null;
-      startRecording();
+      void startRecording();
     }, LONG_PRESS_MS);
   }
 
@@ -237,6 +376,9 @@ export function WishCamera({ settings }: Props) {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
     setMessage("");
+    setTrimSource(null);
+    setCameraReady(false);
+    setCameraError(null);
     setPhase("camera");
   }
 
@@ -255,23 +397,19 @@ export function WishCamera({ settings }: Props) {
       let durationMs: number | undefined;
 
       if (mediaType === "video") {
-        if (blob.size > settings.max_video_bytes) {
-          throw new Error("Video exceeds size limit");
-        }
         const ext = blob.type.includes("mp4") ? "mp4" : "webm";
-        uploadFile = new File([blob], `wish.${ext}`, { type: blob.type || `video/${ext}` });
-        durationMs = recordedDurationMsRef.current || maxSeconds * 1000;
-        if (previewUrl) {
-          durationMs = await new Promise<number>((resolve) => {
-            const v = document.createElement("video");
-            v.preload = "metadata";
-            v.onloadedmetadata = () => {
-              const ms = Math.round((Number.isFinite(v.duration) ? v.duration : maxSeconds) * 1000);
-              resolve(Math.min(ms || durationMs!, maxSeconds * 1000));
-            };
-            v.onerror = () => resolve(durationMs!);
-            v.src = previewUrl;
-          });
+        const raw = new File([blob], `wish.${ext}`, { type: blob.type || `video/${ext}` });
+        if (raw.size > settings.max_video_bytes) {
+          setStatus("Compressing video…");
+        }
+        const compressed = await compressVideoFile(raw, {
+          maxBytes: settings.max_video_bytes,
+          maxSeconds: settings.max_video_seconds,
+        });
+        uploadFile = compressed.file;
+        durationMs = compressed.durationMs || recordedDurationMsRef.current || maxSeconds * 1000;
+        if (Number.isFinite(durationMs)) {
+          durationMs = Math.min(durationMs, maxSeconds * 1000);
         }
       } else {
         const raw = new File([blob], "wish.jpg", { type: "image/jpeg" });
@@ -310,6 +448,97 @@ export function WishCamera({ settings }: Props) {
 
   const ring = `conic-gradient(#c4a574 ${recordProgress * 360}deg, rgba(255,255,255,0.2) 0)`;
 
+  const deviceInputs = (
+    <>
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          void onDeviceCapture(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/mp4,video/quicktime,video/webm,video/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          void onDeviceCapture(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept={GALLERY_ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          void onDeviceCapture(e.target.files);
+          e.target.value = "";
+        }}
+      />
+    </>
+  );
+
+  const devicePickerDialog = showDevicePicker ? (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 p-4 sm:items-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="device-picker-title"
+      onClick={() => setShowDevicePicker(false)}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-2xl border border-white/15 bg-[#141820] text-[#f2f0ea] shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-white/10 px-5 py-4">
+          <h2 id="device-picker-title" className="text-base font-medium">
+            Add media
+          </h2>
+          <p className="mt-1 text-sm text-white/50">Choose how to capture your wish</p>
+        </div>
+        <div className="flex flex-col p-2">
+          <button
+            type="button"
+            className="rounded-xl px-4 py-3.5 text-left text-[15px] hover:bg-white/8"
+            onClick={() => openDeviceOption("photo")}
+          >
+            Take photo
+          </button>
+          <button
+            type="button"
+            className="rounded-xl px-4 py-3.5 text-left text-[15px] hover:bg-white/8"
+            onClick={() => openDeviceOption("video")}
+          >
+            Record video
+          </button>
+          <button
+            type="button"
+            className="rounded-xl px-4 py-3.5 text-left text-[15px] hover:bg-white/8"
+            onClick={() => openDeviceOption("gallery")}
+          >
+            From gallery
+          </button>
+        </div>
+        <div className="border-t border-white/10 p-2">
+          <button
+            type="button"
+            className="w-full rounded-xl px-4 py-3 text-sm text-white/60 hover:bg-white/8"
+            onClick={() => setShowDevicePicker(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (!settings.guest_upload_enabled) {
     return (
       <main className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#0d0f14] px-5 text-center text-[#f2f0ea]">
@@ -320,6 +549,26 @@ export function WishCamera({ settings }: Props) {
         <Link href="/" className="mt-6 text-[#e8d5b5] underline-offset-2 hover:underline">
           Back home
         </Link>
+      </main>
+    );
+  }
+
+  if (phase === "trim" && trimSource) {
+    return (
+      <main className="relative min-h-dvh bg-[#0d0f14]">
+        <VideoTrimSheet
+          file={trimSource}
+          maxSeconds={maxSeconds}
+          maxBytes={settings.max_video_bytes}
+          onCancel={() => {
+            setTrimSource(null);
+            setPhase("camera");
+            setStatus(null);
+          }}
+          onDone={({ file, durationMs }) => {
+            void finishVideoReady(file, durationMs);
+          }}
+        />
       </main>
     );
   }
@@ -362,14 +611,24 @@ export function WishCamera({ settings }: Props) {
         <div className="relative mx-auto mt-14 w-full max-w-lg flex-1 px-4">
           <div className="overflow-hidden rounded-2xl bg-black">
             {mediaType === "video" ? (
-              <video
-                src={previewUrl}
-                className="aspect-[3/4] w-full object-cover"
-                playsInline
-                muted
-                loop
-                autoPlay
-              />
+              <div className="relative">
+                <video
+                  src={previewUrl}
+                  className="aspect-[3/4] w-full object-cover"
+                  playsInline
+                  muted={reviewMuted}
+                  loop
+                  autoPlay
+                  controls
+                />
+                <button
+                  type="button"
+                  className="absolute bottom-3 right-3 rounded-full border border-white/25 bg-black/55 px-3 py-1.5 text-xs backdrop-blur"
+                  onClick={() => setReviewMuted((m) => !m)}
+                >
+                  {reviewMuted ? "Unmute" : "Mute"}
+                </button>
+              </div>
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={previewUrl} alt="" className="aspect-[3/4] w-full object-cover" />
@@ -422,7 +681,15 @@ export function WishCamera({ settings }: Props) {
                 {busy ? "Sending…" : "Send wish"}
               </button>
             </div>
-            {status && <p className="text-sm text-[#d77a6d]">{status}</p>}
+            {status && (
+              <p
+                className={`text-sm ${
+                  status.toLowerCase().includes("compress") ? "text-[#e8d5b5]" : "text-[#d77a6d]"
+                }`}
+              >
+                {status}
+              </p>
+            )}
           </div>
         </div>
       </main>
@@ -438,8 +705,13 @@ export function WishCamera({ settings }: Props) {
       </div>
       <button
         type="button"
-        className="absolute right-4 top-4 z-20 rounded-full border border-white/25 bg-black/40 px-3 py-1.5 text-sm backdrop-blur"
-        onClick={() => setFacing((f) => (f === "user" ? "environment" : "user"))}
+        className="absolute right-4 top-4 z-20 rounded-full border border-white/25 bg-black/40 px-3 py-1.5 text-sm backdrop-blur disabled:opacity-40"
+        disabled={!cameraReady || cameraBusy}
+        onClick={() => {
+          const next: Facing = facing === "user" ? "environment" : "user";
+          setFacing(next);
+          void startCamera(next);
+        }}
       >
         Flip
       </button>
@@ -456,12 +728,35 @@ export function WishCamera({ settings }: Props) {
 
       <div className="absolute inset-x-0 bottom-10 z-20 flex flex-col items-center gap-3">
         <p className="text-sm text-white/70">
-          {recording
-            ? `Recording… ${Math.max(0, Math.ceil(maxSeconds * (1 - recordProgress)))}s`
-            : "Tap for photo · hold for video"}
+          {!cameraReady
+            ? "Enable the camera to send a wish"
+            : recording
+              ? `Recording… ${Math.max(0, Math.ceil(maxSeconds * (1 - recordProgress)))}s`
+              : "Tap for photo · hold for video"}
         </p>
-        {cameraError ? (
-          <p className="max-w-xs text-center text-sm text-[#d77a6d]">{cameraError}</p>
+        {!cameraReady ? (
+          <div className="flex max-w-sm flex-col items-center gap-3 px-4">
+            {cameraError && <p className="text-center text-sm text-[#d77a6d]">{cameraError}</p>}
+            <div className="flex flex-wrap justify-center gap-2">
+              <button
+                type="button"
+                className="rounded-full bg-[#c4a574] px-4 py-2.5 text-sm text-[#1a140c] disabled:opacity-60"
+                disabled={cameraBusy}
+                onClick={() => void startCamera(facing)}
+              >
+                {cameraBusy ? "Requesting…" : "Enable camera"}
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-white/30 bg-black/40 px-4 py-2.5 text-sm backdrop-blur"
+                disabled={cameraBusy}
+                onClick={() => setShowDevicePicker(true)}
+              >
+                Device camera / video
+              </button>
+            </div>
+            {deviceInputs}
+          </div>
         ) : (
           <button
             type="button"
@@ -485,8 +780,17 @@ export function WishCamera({ settings }: Props) {
             />
           </button>
         )}
-        {status && <p className="text-sm text-[#d77a6d]">{status}</p>}
+        {status && (
+          <p
+            className={`text-sm ${
+              status.toLowerCase().includes("compress") ? "text-[#e8d5b5]" : "text-[#d77a6d]"
+            }`}
+          >
+            {status}
+          </p>
+        )}
       </div>
+      {devicePickerDialog}
     </main>
   );
 }

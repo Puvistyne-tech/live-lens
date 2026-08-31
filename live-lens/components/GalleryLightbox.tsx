@@ -120,8 +120,10 @@ export function GalleryLightbox({
     if (result === "copied") {
       setShareHint("Link copied");
       window.setTimeout(() => setShareHint(null), 2000);
+    } else if (result === "shared") {
+      setShareHint(null);
     } else if (result === "failed") {
-      setShareHint("Could not share");
+      setShareHint("Could not copy link");
       window.setTimeout(() => setShareHint(null), 2000);
     }
   }
@@ -174,11 +176,8 @@ export function GalleryLightbox({
                   className="relative h-[70dvh] w-full max-w-5xl"
                   objectPosition={media ? objectPosition(media) : "50% 50%"}
                 />
-                {(("alt" in s && s.alt) || media?.tag) && (
-                  <p className="mt-3 max-w-xl text-center text-sm text-white/70">
-                    {"alt" in s ? s.alt : ""}
-                    {media?.tag ? ` · ${media.tag}` : ""}
-                  </p>
+                {media?.tag && !media.caption && (
+                  <p className="mt-3 max-w-xl text-center text-sm text-white/70">{media.tag}</p>
                 )}
               </div>
             );
@@ -186,8 +185,16 @@ export function GalleryLightbox({
         }}
       />
 
+      {open && items[index]?.caption && (
+        <div className="pointer-events-none fixed inset-x-0 top-14 z-[10050] flex justify-center px-6 sm:top-16">
+          <p className="max-w-2xl text-center font-[family-name:var(--font-display)] text-lg text-white/95 drop-shadow-[0_2px_12px_rgba(0,0,0,0.75)] sm:text-xl">
+            {items[index].caption}
+          </p>
+        </div>
+      )}
+
       {open && shareHint && (
-        <div className="pointer-events-none fixed inset-x-0 top-16 z-[10002] flex justify-center">
+        <div className="pointer-events-none fixed inset-x-0 top-28 z-[10050] flex justify-center">
           <span className="rounded-full border border-white/20 bg-black/70 px-4 py-2 text-sm text-[#e8d5b5] backdrop-blur">
             {shareHint}
           </span>
@@ -195,12 +202,15 @@ export function GalleryLightbox({
       )}
 
       {open && items.length > 1 && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[10001] flex justify-center gap-3">
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[10050] flex justify-center gap-3">
           <button
             type="button"
             className="pointer-events-auto rounded-full border border-white/25 bg-black/60 px-5 py-2.5 text-sm text-white backdrop-blur disabled:opacity-30"
             disabled={index <= 0}
-            onClick={() => onIndexChange(Math.max(0, index - 1))}
+            onClick={(e) => {
+              e.stopPropagation();
+              onIndexChange(Math.max(0, index - 1));
+            }}
           >
             Previous
           </button>
@@ -208,7 +218,10 @@ export function GalleryLightbox({
             type="button"
             className="pointer-events-auto rounded-full border border-white/25 bg-black/60 px-5 py-2.5 text-sm text-white backdrop-blur disabled:opacity-30"
             disabled={index >= items.length - 1}
-            onClick={() => onIndexChange(Math.min(items.length - 1, index + 1))}
+            onClick={(e) => {
+              e.stopPropagation();
+              onIndexChange(Math.min(items.length - 1, index + 1));
+            }}
           >
             Next
           </button>

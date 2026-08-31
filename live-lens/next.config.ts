@@ -8,7 +8,7 @@ const faceApiEsm = path.join(
 );
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["172.30.199.130"],
+  allowedDevOrigins: ["192.168.1.229", "172.30.199.130"],
   transpilePackages: ["three", "@react-three/fiber", "@react-three/drei"],
   // Package "main" points at the Node build; force browser ESM for client bundles.
   turbopack: {

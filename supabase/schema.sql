@@ -36,6 +36,7 @@ create table public.event_settings (
   max_video_bytes bigint not null default 26214400,
   max_video_seconds integer not null default 10,
   live_include_guest_video boolean not null default true,
+  live_video_sound boolean not null default false,
   couple_names text,
   event_title text,
   event_date text,

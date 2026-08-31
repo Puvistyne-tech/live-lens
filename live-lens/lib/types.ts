@@ -29,6 +29,7 @@ export type EventSettings = {
   max_video_bytes: number;
   max_video_seconds: number;
   live_include_guest_video: boolean;
+  live_video_sound: boolean;
   couple_names: string | null;
   event_title: string | null;
   event_date: string | null;

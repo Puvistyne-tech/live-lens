@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 import type { MediaRow } from "@/lib/types";
@@ -39,7 +39,6 @@ type Props = {
 };
 
 export function GalleryClient({ initialItems }: Props) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [items, setItems] = useState(initialItems);
   const [album, setAlbum] = useState<AlbumKey>("all");
@@ -49,6 +48,7 @@ export function GalleryClient({ initialItems }: Props) {
     defaultCols: 3,
   });
   const { preferLowQuality, dataSaver, setDataSaver } = useNetworkQuality();
+  const [viewOptionsOpen, setViewOptionsOpen] = useState(false);
 
   useEffect(() => {
     const supabase = createBrowserSupabase();
@@ -122,13 +122,16 @@ export function GalleryClient({ initialItems }: Props) {
     if (idx >= 0) setLightboxIndex(idx);
   }, [searchParams, lightboxItems]);
 
+  /** Avoid router.replace — it remounts the page and breaks lightbox prev/next/share. */
   function syncUrl(nextIndex: number) {
+    if (typeof window === "undefined") return;
     const item = nextIndex >= 0 ? lightboxItems[nextIndex] : null;
-    if (item) {
-      router.replace(`/gallery?id=${encodeURIComponent(item.id)}`, { scroll: false });
-    } else {
-      router.replace("/gallery", { scroll: false });
-    }
+    const next = item
+      ? `/gallery?id=${encodeURIComponent(item.id)}`
+      : "/gallery";
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (current === next) return;
+    window.history.replaceState(window.history.state, "", next);
   }
 
   const openAt = (item: MediaRow) => {
@@ -180,19 +183,7 @@ export function GalleryClient({ initialItems }: Props) {
           })}
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setDataSaver(!dataSaver)}
-            className={`rounded-full px-3 py-1.5 text-xs transition ${
-              dataSaver || preferLowQuality
-                ? "bg-[#c4a574]/25 text-[#e8d5b5] ring-1 ring-[#c4a574]/50"
-                : "border border-white/15 text-white/60 hover:text-white"
-            }`}
-            title="Use smaller images on slow connections"
-          >
-            Data saver{dataSaver ? " on" : ""}
-          </button>
+        <div className="relative flex shrink-0 flex-wrap items-center gap-2">
           <div
             className="flex shrink-0 items-center gap-1 rounded-full border border-white/15 bg-white/5 p-1"
             role="group"
@@ -212,6 +203,35 @@ export function GalleryClient({ initialItems }: Props) {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => setViewOptionsOpen((o) => !o)}
+            className={`rounded-full px-3 py-1.5 text-xs transition ${
+              viewOptionsOpen || dataSaver || preferLowQuality
+                ? "bg-[#c4a574]/25 text-[#e8d5b5] ring-1 ring-[#c4a574]/50"
+                : "border border-white/15 text-white/60 hover:text-white"
+            }`}
+            aria-expanded={viewOptionsOpen}
+            aria-haspopup="true"
+            title="View options"
+          >
+            View
+          </button>
+          {viewOptionsOpen && (
+            <div className="absolute right-0 top-full z-30 mt-2 min-w-[12rem] rounded-xl border border-white/15 bg-[#14161c] p-2 shadow-xl">
+              <button
+                type="button"
+                onClick={() => setDataSaver(!dataSaver)}
+                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm text-white/85 hover:bg-white/5"
+                title="Use smaller images on slow connections"
+              >
+                <span>Data saver</span>
+                <span className="text-xs text-white/50">
+                  {dataSaver || preferLowQuality ? "On" : "Off"}
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

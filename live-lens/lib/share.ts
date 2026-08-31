@@ -17,7 +17,41 @@ function dataUrlToFile(dataUrl: string, filename: string): File | null {
   }
 }
 
-export type ShareResult = "shared" | "copied" | "failed";
+export type ShareResult = "shared" | "copied" | "cancelled" | "failed";
+
+function isMobile() {
+  return typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function isAbort(err: unknown) {
+  return err instanceof Error && err.name === "AbortError";
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+
+  try {
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.setAttribute("readonly", "");
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 export async function shareLink(opts: {
   url: string;
@@ -25,21 +59,19 @@ export async function shareLink(opts: {
   text?: string;
 }): Promise<ShareResult> {
   const { url, title = "LiveLens", text } = opts;
-  try {
-    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+
+  // Mobile: native share sheet. Desktop: copy (Web Share is awkward / often cancelled).
+  if (isMobile() && typeof navigator.share === "function") {
+    try {
       await navigator.share({ title, text: text || title, url });
       return "shared";
+    } catch (err) {
+      if (isAbort(err)) return "cancelled";
     }
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") return "failed";
   }
 
-  try {
-    await navigator.clipboard.writeText(url);
-    return "copied";
-  } catch {
-    return "failed";
-  }
+  if (await copyText(url)) return "copied";
+  return "failed";
 }
 
 /** Share site link plus an image (e.g. QR PNG) when the browser supports file shares. */
@@ -60,14 +92,14 @@ export async function shareLinkWithImage(opts: {
 
   const file = imageDataUrl ? dataUrlToFile(imageDataUrl, imageFilename) : null;
 
-  try {
-    if (
-      file &&
-      typeof navigator !== "undefined" &&
-      typeof navigator.share === "function" &&
-      typeof navigator.canShare === "function" &&
-      navigator.canShare({ files: [file] })
-    ) {
+  if (
+    isMobile() &&
+    file &&
+    typeof navigator.share === "function" &&
+    typeof navigator.canShare === "function" &&
+    navigator.canShare({ files: [file] })
+  ) {
+    try {
       await navigator.share({
         title,
         text: text || `${title}\n${url}`,
@@ -75,9 +107,9 @@ export async function shareLinkWithImage(opts: {
         files: [file],
       });
       return "shared";
+    } catch (err) {
+      if (isAbort(err)) return "cancelled";
     }
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") return "failed";
   }
 
   return shareLink({ url, title, text });

@@ -74,6 +74,7 @@ export async function updateSettingsAction(patch: Partial<EventSettings>) {
     "max_video_bytes",
     "max_video_seconds",
     "live_include_guest_video",
+    "live_video_sound",
     "couple_names",
     "event_title",
     "event_date",

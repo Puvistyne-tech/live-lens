@@ -9,6 +9,9 @@ const videoCache = new Map<string, HTMLVideoElement>();
 function preloadImage(url: string) {
   if (!url || imageCache.has(url)) return;
   const img = new Image();
+  // Must match TextureLoader (crossOrigin=anonymous) or the browser HTTP cache
+  // returns a non-CORS response and WebGL texture loads fail on /live.
+  img.crossOrigin = "anonymous";
   img.decoding = "async";
   img.src = url;
   imageCache.set(url, img);
