@@ -96,7 +96,9 @@ export function LiveWall({ initialItems, settings }: Props) {
     });
   }, [items, liveSettings]);
 
+
   const current = visible[index % Math.max(visible.length, 1)];
+  
   const couple = liveSettings?.couple_names?.trim();
   const isWish = current?.tag?.toLowerCase() === "wish";
   const uploaderLabel = (() => {
